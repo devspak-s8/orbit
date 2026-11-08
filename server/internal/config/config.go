@@ -6,6 +6,7 @@ package config
 import (
 	"os"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -15,6 +16,8 @@ type Config struct {
 	DatabaseURL string
 	// CORSOrigins lists allowed browser origins for cross-origin API calls.
 	CORSOrigins []string
+	// SessionTTL is the lifetime of an authenticated session.
+	SessionTTL time.Duration
 }
 
 func Load() Config {
@@ -22,6 +25,7 @@ func Load() Config {
 		HTTPAddr:    envOr("ORBIT_HTTP_ADDR", ":8080"),
 		DatabaseURL: envOr("ORBIT_DATABASE_URL", "postgres://orbit:orbit@localhost:5434/orbit?sslmode=disable"),
 		CORSOrigins: splitList(envOr("ORBIT_CORS_ORIGINS", "http://localhost:5173")),
+		SessionTTL:  30 * 24 * time.Hour,
 	}
 }
 

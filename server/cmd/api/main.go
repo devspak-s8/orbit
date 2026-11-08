@@ -13,6 +13,7 @@ import (
 	"github.com/orbit-org/orbit/server/internal/config"
 	"github.com/orbit-org/orbit/server/internal/db"
 	"github.com/orbit-org/orbit/server/internal/httpapi"
+	"github.com/orbit-org/orbit/server/internal/identity"
 )
 
 func main() {
@@ -36,9 +37,11 @@ func main() {
 	}
 	logger.Info("database ready")
 
+	ident := identity.NewService(pool, cfg.SessionTTL)
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(pool, logger, cfg.CORSOrigins),
+		Handler:           httpapi.NewRouter(pool, logger, cfg.CORSOrigins, ident),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

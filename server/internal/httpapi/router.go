@@ -8,12 +8,14 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/orbit-org/orbit/server/internal/identity"
 )
 
 // NewRouter builds the full API handler with standard middleware applied.
-// The pool is threaded through here so future domain handlers can be
-// registered against real infrastructure.
-func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string) http.Handler {
+// The pool is threaded through so domain handlers can be registered
+// against real infrastructure.
+func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string, ident *identity.Service) http.Handler {
 	mux := http.NewServeMux()
 
 	// Liveness/readiness, unauthenticated.
@@ -30,11 +32,12 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string)
 	api.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"message": "pong"})
 	})
+	ident.Handlers(api)
 	mux.Handle("/v1/", api)
 
 	var h http.Handler = mux
 	h = withCORS(allowedOrigins, h)
-	h = withRequestID(h)
 	h = withLogging(logger, h)
+	h = withRequestID(h)
 	return h
 }
