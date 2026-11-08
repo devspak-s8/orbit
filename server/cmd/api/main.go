@@ -14,6 +14,7 @@ import (
 	"github.com/orbit-org/orbit/server/internal/db"
 	"github.com/orbit-org/orbit/server/internal/httpapi"
 	"github.com/orbit-org/orbit/server/internal/identity"
+	"github.com/orbit-org/orbit/server/internal/workspaces"
 )
 
 func main() {
@@ -38,10 +39,11 @@ func main() {
 	logger.Info("database ready")
 
 	ident := identity.NewService(pool, cfg.SessionTTL)
+	ws := workspaces.NewService(pool)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(pool, logger, cfg.CORSOrigins, ident),
+		Handler:           httpapi.NewRouter(pool, logger, cfg.CORSOrigins, ident, ws),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

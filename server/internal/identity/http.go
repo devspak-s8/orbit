@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/orbit-org/orbit/server/internal/apijson"
 )
 
 const sessionCookieName = "orbit_session"
@@ -165,18 +167,9 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(body); err != nil {
-		slog.Error("encoding response", "error", err)
-	}
-}
-
-type apiError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	apijson.WriteJSON(w, status, body)
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, apiError{Code: code, Message: message})
+	apijson.WriteError(w, status, code, message)
 }

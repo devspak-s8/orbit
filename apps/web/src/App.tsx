@@ -3,6 +3,8 @@ import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { logout as apiLogout, me as fetchMe, type User } from './lib/api'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import Workspaces from './pages/Workspaces'
+import WorkspaceHome from './pages/WorkspaceHome'
 
 function Home({ user }: { user: User }) {
   return (
@@ -95,7 +97,8 @@ export default function App() {
     <Shell me={me} onLogout={handleLogout}>
       <Routes>
         <Route path="/" element={<Home user={me} />} />
-        <Route path="/workspaces" element={<div className="text-2xl font-semibold">Workspaces — next milestone</div>} />
+        <Route path="/workspaces" element={<Workspaces />} />
+        <Route path="/workspaces/:id" element={<WorkspaceHome />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Shell>

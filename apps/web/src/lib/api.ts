@@ -5,6 +5,14 @@ export interface User {
   createdAt: string
 }
 
+export interface Workspace {
+  id: string
+  name: string
+  slug: string
+  role: string
+  createdAt: string
+}
+
 export class ApiError extends Error {
   code: string
 
@@ -77,4 +85,19 @@ export async function logout(): Promise<void> {
   } catch {
     // Logout is best-effort; the local state is cleared regardless.
   }
+}
+
+export function listWorkspaces(): Promise<Workspace[]> {
+  return api<{ workspaces: Workspace[] }>('/v1/workspaces').then((r) => r.workspaces)
+}
+
+export function createWorkspace(name: string): Promise<Workspace> {
+  return api<{ workspace: Workspace }>('/v1/workspaces', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  }).then((r) => r.workspace)
+}
+
+export function getWorkspace(id: string): Promise<Workspace> {
+  return api<{ workspace: Workspace }>(`/v1/workspaces/${id}`).then((r) => r.workspace)
 }
