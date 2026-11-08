@@ -1,0 +1,20 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Go
+server/bin/
+
+# Environment and local config
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs
+*.log
