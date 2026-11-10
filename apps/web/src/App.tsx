@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Workspaces from './pages/Workspaces'
 import WorkspaceHome from './pages/WorkspaceHome'
+import ModuleDemo from './pages/ModuleDemo'
 
 function Home({ user }: { user: User }) {
   return (
@@ -99,6 +100,7 @@ export default function App() {
         <Route path="/" element={<Home user={me} />} />
         <Route path="/workspaces" element={<Workspaces />} />
         <Route path="/workspaces/:id" element={<WorkspaceHome />} />
+        <Route path="/workspaces/:id/modules/:moduleId" element={<ModuleDemo />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Shell>

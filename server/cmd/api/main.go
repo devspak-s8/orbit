@@ -12,8 +12,11 @@ import (
 
 	"github.com/orbit-org/orbit/server/internal/config"
 	"github.com/orbit-org/orbit/server/internal/db"
+	"github.com/orbit-org/orbit/server/internal/demo"
+	"github.com/orbit-org/orbit/server/internal/events"
 	"github.com/orbit-org/orbit/server/internal/httpapi"
 	"github.com/orbit-org/orbit/server/internal/identity"
+	"github.com/orbit-org/orbit/server/internal/modules"
 	"github.com/orbit-org/orbit/server/internal/workspaces"
 )
 
@@ -38,12 +41,36 @@ func main() {
 	}
 	logger.Info("database ready")
 
+	// Module catalog: any invalid embedded manifest fails the boot.
+	catalog, err := modules.LoadCatalog()
+	if err != nil {
+		logger.Error("loading module catalog", "error", err)
+		os.Exit(1)
+	}
+
 	ident := identity.NewService(pool, cfg.SessionTTL)
 	ws := workspaces.NewService(pool)
+	mods := modules.NewService(pool, catalog)
+	eventsSvc := events.NewService(pool)
+	demoSvc := demo.NewService(pool, eventsSvc, mods)
+	mods.RegisterUninstallHook("orbit.demo", demoSvc.Cleanup)
+
+	if err := mods.Seed(ctx); err != nil {
+		logger.Error("seeding module registry", "error", err)
+		os.Exit(1)
+	}
+
+	svcs := httpapi.Services{
+		Identity:   ident,
+		Workspaces: ws,
+		Modules:    mods,
+		Demo:       demoSvc,
+		Events:     eventsSvc,
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(pool, logger, cfg.CORSOrigins, ident, ws),
+		Handler:           httpapi.NewRouter(pool, logger, cfg.CORSOrigins, svcs),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

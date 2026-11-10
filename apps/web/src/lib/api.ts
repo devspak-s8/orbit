@@ -101,3 +101,73 @@ export function createWorkspace(name: string): Promise<Workspace> {
 export function getWorkspace(id: string): Promise<Workspace> {
   return api<{ workspace: Workspace }>(`/v1/workspaces/${id}`).then((r) => r.workspace)
 }
+
+export interface WorkspaceModule {
+  id: string
+  name: string
+  version: string
+  description: string
+  installed: boolean
+  enabled: boolean
+  frontend?: string
+  events?: string[]
+}
+
+export interface WorkspaceEvent {
+  type: string
+  schemaVersion: number
+  workspaceId: string
+  actorUserId?: string
+  correlationId?: string
+  payload: Record<string, unknown>
+  createdAt: string
+}
+
+export interface DemoRecord {
+  id: string
+  title: string
+  createdAt: string
+}
+
+export function listWorkspaceModules(workspaceId: string): Promise<WorkspaceModule[]> {
+  return api<{ modules: WorkspaceModule[] }>(`/v1/workspaces/${workspaceId}/modules`).then((r) => r.modules)
+}
+
+export function installModule(workspaceId: string, moduleId: string): Promise<WorkspaceModule> {
+  return api<{ module: WorkspaceModule }>(`/v1/workspaces/${workspaceId}/modules/${moduleId}/install`, {
+    method: 'POST',
+  }).then((r) => r.module)
+}
+
+export function enableModule(workspaceId: string, moduleId: string): Promise<WorkspaceModule> {
+  return api<{ module: WorkspaceModule }>(`/v1/workspaces/${workspaceId}/modules/${moduleId}/enable`, {
+    method: 'POST',
+  }).then((r) => r.module)
+}
+
+export function disableModule(workspaceId: string, moduleId: string): Promise<WorkspaceModule> {
+  return api<{ module: WorkspaceModule }>(`/v1/workspaces/${workspaceId}/modules/${moduleId}/disable`, {
+    method: 'POST',
+  }).then((r) => r.module)
+}
+
+export function uninstallModule(workspaceId: string, moduleId: string): Promise<void> {
+  return api<{ status: string }>(`/v1/workspaces/${workspaceId}/modules/${moduleId}`, {
+    method: 'DELETE',
+  }).then(() => undefined)
+}
+
+export function listWorkspaceEvents(workspaceId: string): Promise<WorkspaceEvent[]> {
+  return api<{ events: WorkspaceEvent[] }>(`/v1/workspaces/${workspaceId}/events`).then((r) => r.events)
+}
+
+export function listDemoRecords(workspaceId: string): Promise<DemoRecord[]> {
+  return api<{ records: DemoRecord[] }>(`/v1/workspaces/${workspaceId}/modules/demo/records`).then((r) => r.records)
+}
+
+export function addDemoRecord(workspaceId: string, title: string): Promise<DemoRecord> {
+  return api<{ record: DemoRecord }>(`/v1/workspaces/${workspaceId}/modules/demo/records`, {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  }).then((r) => r.record)
+}

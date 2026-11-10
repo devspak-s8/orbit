@@ -9,14 +9,24 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/orbit-org/orbit/server/internal/demo"
+	"github.com/orbit-org/orbit/server/internal/events"
 	"github.com/orbit-org/orbit/server/internal/identity"
+	"github.com/orbit-org/orbit/server/internal/modules"
 	"github.com/orbit-org/orbit/server/internal/workspaces"
 )
 
+// Services bundles the domain services the router wires into HTTP routes.
+type Services struct {
+	Identity   *identity.Service
+	Workspaces *workspaces.Service
+	Modules    *modules.Service
+	Demo       *demo.Service
+	Events     *events.Service
+}
+
 // NewRouter builds the full API handler with standard middleware applied.
-// The pool is threaded through so domain handlers can be registered
-// against real infrastructure.
-func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string, ident *identity.Service, ws *workspaces.Service) http.Handler {
+func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string, svcs Services) http.Handler {
 	mux := http.NewServeMux()
 
 	// Liveness/readiness, unauthenticated.
@@ -33,11 +43,21 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string,
 	api.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"message": "pong"})
 	})
-	ident.Handlers(api)
-	wsMux := http.NewServeMux()
-	ws.Handlers(wsMux)
-	api.Handle("/v1/workspaces", ident.RequireUser(wsMux))
-	api.Handle("/v1/workspaces/", ident.RequireUser(wsMux))
+
+	// Identity endpoints (some public, some session-guarded internally).
+	svcs.Identity.Handlers(api)
+
+	// Everything under /v1/workspaces requires an authenticated session.
+	// Deeper authorization (membership, owner role, module enabled) is
+	// enforced inside the services, which query the database directly.
+	wsAPI := http.NewServeMux()
+	svcs.Workspaces.Handlers(wsAPI)
+	svcs.Modules.Handlers(wsAPI)
+	svcs.Demo.Handlers(wsAPI)
+	svcs.Events.Handlers(wsAPI)
+	api.Handle("/v1/workspaces", svcs.Identity.RequireUser(wsAPI))
+	api.Handle("/v1/workspaces/", svcs.Identity.RequireUser(wsAPI))
+
 	mux.Handle("/v1/", api)
 
 	var h http.Handler = mux
