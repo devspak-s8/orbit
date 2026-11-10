@@ -154,6 +154,14 @@ export default function WorkspaceHome() {
           Slug <span className="text-neutral-200">{workspace.slug}</span> · your role{' '}
           <span className="text-neutral-200">{workspace.role}</span>
         </p>
+        <div className="mt-3 flex gap-3 text-sm">
+          <Link
+            to={`/workspaces/${workspace.id}/workflows`}
+            className="rounded border border-neutral-700 px-3 py-1.5 hover:border-neutral-500"
+          >
+            Workflows →
+          </Link>
+        </div>
       </div>
 
       <div>

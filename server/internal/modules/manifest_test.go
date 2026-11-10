@@ -4,11 +4,11 @@ import "testing"
 
 func TestManifestValidation(t *testing.T) {
 	valid := Manifest{
-		ID:          "orbit.demo",
-		Name:        "Demo",
-		Version:     "0.1.0",
-		APIVersion:  "1",
-		Permissions: []string{"workspace.read"},
+		ID:           "orbit.demo",
+		Name:         "Demo",
+		Version:      "0.1.0",
+		APIVersion:   "1",
+		Permissions:  []string{"workspace.read"},
 		Dependencies: []string{"orbit.core"},
 	}
 	if err := valid.Validate(); err != nil {

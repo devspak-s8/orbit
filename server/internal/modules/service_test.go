@@ -14,12 +14,12 @@ import (
 )
 
 type env struct {
-	mods     *Service
-	ownerID  string
-	memberID string
+	mods      *Service
+	ownerID   string
+	memberID  string
 	workspace string
-	cleanup  func()
-	ctx      context.Context
+	cleanup   func()
+	ctx       context.Context
 }
 
 // setup builds a workspace with an owner and a plain member.

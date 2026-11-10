@@ -6,6 +6,8 @@ import Signup from './pages/Signup'
 import Workspaces from './pages/Workspaces'
 import WorkspaceHome from './pages/WorkspaceHome'
 import ModuleDemo from './pages/ModuleDemo'
+import Workflows from './pages/Workflows'
+import WorkflowDetail from './pages/WorkflowDetail'
 
 function Home({ user }: { user: User }) {
   return (
@@ -100,6 +102,8 @@ export default function App() {
         <Route path="/" element={<Home user={me} />} />
         <Route path="/workspaces" element={<Workspaces />} />
         <Route path="/workspaces/:id" element={<WorkspaceHome />} />
+        <Route path="/workspaces/:id/workflows" element={<Workflows />} />
+        <Route path="/workspaces/:id/workflows/:wid" element={<WorkflowDetail />} />
         <Route path="/workspaces/:id/modules/:moduleId" element={<ModuleDemo />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

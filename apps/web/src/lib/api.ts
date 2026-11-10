@@ -171,3 +171,96 @@ export function addDemoRecord(workspaceId: string, title: string): Promise<DemoR
     body: JSON.stringify({ title }),
   }).then((r) => r.record)
 }
+
+export interface Workflow {
+  id: string
+  workspaceId: string
+  name: string
+  status: 'draft' | 'ready' | 'archived'
+  currentVersion: number
+  definition?: WorkflowDefinition
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkflowDefinition {
+  trigger: { type: 'event' | 'manual'; eventType?: string }
+  nodes: Array<{
+    id: string
+    type: 'http' | 'log'
+    config: {
+      method?: string
+      url?: string
+      headers?: Record<string, string>
+      body?: Record<string, unknown>
+      message?: string
+      retries?: number
+      timeoutMs?: number
+    }
+  }>
+  edges: Array<{ from: string; to: string }>
+  timeoutMs?: number
+}
+
+export interface WorkflowRun {
+  id: string
+  workflowId: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  triggerType: string
+  triggerPayload: Record<string, unknown>
+  error: string
+  startedAt: string | null
+  finishedAt: string | null
+  createdAt: string
+}
+
+export interface WorkflowStep {
+  seq: number
+  nodeId: string
+  nodeType: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+  input: Record<string, unknown>
+  output: Record<string, unknown>
+  error: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export function listWorkflows(workspaceId: string): Promise<Workflow[]> {
+  return api<{ workflows: Workflow[] }>(`/v1/workspaces/${workspaceId}/workflows`).then((r) => r.workflows)
+}
+
+export function createWorkflow(
+  workspaceId: string,
+  name: string,
+  definition: WorkflowDefinition,
+): Promise<Workflow> {
+  return api<{ workflow: Workflow }>(`/v1/workspaces/${workspaceId}/workflows`, {
+    method: 'POST',
+    body: JSON.stringify({ name, definition }),
+  }).then((r) => r.workflow)
+}
+
+export function validateWorkflow(workspaceId: string, workflowId: string): Promise<Workflow> {
+  return api<{ workflow: Workflow }>(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/validate`, {
+    method: 'POST',
+  }).then((r) => r.workflow)
+}
+
+export function runWorkflow(workspaceId: string, workflowId: string): Promise<WorkflowRun> {
+  return api<{ run: WorkflowRun }>(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/run`, {
+    method: 'POST',
+  }).then((r) => r.run)
+}
+
+export function listWorkflowRuns(workspaceId: string, workflowId: string): Promise<WorkflowRun[]> {
+  return api<{ runs: WorkflowRun[] }>(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/runs`).then((r) => r.runs)
+}
+
+export function getWorkflowRun(
+  workspaceId: string,
+  workflowId: string,
+  runId: string,
+): Promise<{ run: WorkflowRun; steps: WorkflowStep[] }> {
+  return api(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/runs/${runId}`)
+}

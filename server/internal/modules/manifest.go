@@ -11,12 +11,12 @@ import (
 
 // Manifest is the module declaration format (PRD 7.1).
 type Manifest struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Version     string   `json:"version"`
-	APIVersion  string   `json:"apiVersion"`
-	Description string   `json:"description"`
-	Permissions []string `json:"permissions"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Version      string   `json:"version"`
+	APIVersion   string   `json:"apiVersion"`
+	Description  string   `json:"description"`
+	Permissions  []string `json:"permissions"`
 	Dependencies []string `json:"dependencies"`
 	// Events lists the event types this module may emit.
 	Events []string `json:"events,omitempty"`

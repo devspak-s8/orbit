@@ -1,0 +1,356 @@
+package automation
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var (
+	ErrWorkflowNotFound = errors.New("workflow not found")
+	ErrRunNotFound      = errors.New("run not found")
+	ErrNotReady         = errors.New("workflow must be validated (ready) before it can run")
+	ErrForbidden        = errors.New("you do not have access to this workspace")
+	ErrInvalidInput     = errors.New("invalid input")
+	// ErrInvalidDefinition wraps validator output so handlers can map it
+	// to a 400 with the full problem list.
+	ErrInvalidDefinition = errors.New("invalid definition")
+)
+
+// Workflow is a workflow's metadata; the definition lives in versions.
+type Workflow struct {
+	ID             string      `json:"id"`
+	WorkspaceID    string      `json:"workspaceId"`
+	Name           string      `json:"name"`
+	Status         string      `json:"status"`
+	CurrentVersion int         `json:"currentVersion"`
+	Definition     *Definition `json:"definition,omitempty"`
+	CreatedAt      time.Time   `json:"createdAt"`
+	UpdatedAt      time.Time   `json:"updatedAt"`
+}
+
+// Run is one execution of a workflow.
+type Run struct {
+	ID             string         `json:"id"`
+	WorkflowID     string         `json:"workflowId"`
+	WorkspaceID    string         `json:"workspaceId"`
+	Version        int            `json:"version"`
+	Status         string         `json:"status"`
+	TriggerType    string         `json:"triggerType"`
+	TriggerPayload map[string]any `json:"triggerPayload"`
+	Error          string         `json:"error"`
+	StartedAt      *time.Time     `json:"startedAt"`
+	FinishedAt     *time.Time     `json:"finishedAt"`
+	CreatedAt      time.Time      `json:"createdAt"`
+}
+
+// Step is one node execution inside a run.
+type Step struct {
+	RunID      string         `json:"-"`
+	Seq        int            `json:"seq"`
+	NodeID     string         `json:"nodeId"`
+	NodeType   string         `json:"nodeType"`
+	Status     string         `json:"status"`
+	Input      map[string]any `json:"input"`
+	Output     map[string]any `json:"output"`
+	Error      string         `json:"error"`
+	StartedAt  *time.Time     `json:"startedAt"`
+	FinishedAt *time.Time     `json:"finishedAt"`
+}
+
+// Service manages workflow definitions and run history.
+type Service struct {
+	pool *pgxpool.Pool
+}
+
+func NewService(pool *pgxpool.Pool) *Service {
+	return &Service{pool: pool}
+}
+
+// Create stores a new workflow in draft with its first version.
+func (s *Service) Create(ctx context.Context, userID, workspaceID, name string, def Definition) (Workflow, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 120 {
+		return Workflow{}, ErrInvalidInput
+	}
+	if err := def.Validate(); err != nil {
+		return Workflow{}, fmt.Errorf("%w: %s", ErrInvalidDefinition, err)
+	}
+	raw, err := json.Marshal(def)
+	if err != nil {
+		return Workflow{}, fmt.Errorf("marshal definition: %w", err)
+	}
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return Workflow{}, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Workflow{}, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var wf Workflow
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO workflows (workspace_id, name, created_by)
+		 VALUES ($1, $2, $3)
+		 RETURNING id::text, workspace_id::text, name, status, current_version, created_at, updated_at`,
+		workspaceID, name, userID,
+	).Scan(&wf.ID, &wf.WorkspaceID, &wf.Name, &wf.Status, &wf.CurrentVersion, &wf.CreatedAt, &wf.UpdatedAt); err != nil {
+		return Workflow{}, fmt.Errorf("insert workflow: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO workflow_versions (workflow_id, version, definition) VALUES ($1, 1, $2)`,
+		wf.ID, raw,
+	); err != nil {
+		return Workflow{}, fmt.Errorf("insert workflow version: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Workflow{}, fmt.Errorf("commit: %w", err)
+	}
+	return wf, nil
+}
+
+// Validate re-checks the current definition and promotes draft â†’ ready.
+// Validation never executes anything (PRD 6.2: editing and execution are
+// separate concerns).
+func (s *Service) Validate(ctx context.Context, userID, workspaceID, workflowID string) (Workflow, error) {
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return Workflow{}, err
+	}
+	wf, def, err := s.load(ctx, workspaceID, workflowID)
+	if err != nil {
+		return Workflow{}, err
+	}
+	if err := def.Validate(); err != nil {
+		return Workflow{}, fmt.Errorf("%w: %s", ErrInvalidDefinition, err)
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE workflow_versions SET validated_at = now()
+		 WHERE workflow_id = $1 AND version = $2`,
+		workflowID, wf.CurrentVersion,
+	); err != nil {
+		return Workflow{}, fmt.Errorf("mark validated: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE workflows SET status = 'ready', updated_at = now() WHERE id = $1`,
+		workflowID,
+	); err != nil {
+		return Workflow{}, fmt.Errorf("set ready: %w", err)
+	}
+	wf.Status = "ready"
+	wf.Definition = &def
+	return wf, nil
+}
+
+// Get returns a workflow with its current definition.
+func (s *Service) Get(ctx context.Context, userID, workspaceID, workflowID string) (Workflow, error) {
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return Workflow{}, err
+	}
+	wf, def, err := s.load(ctx, workspaceID, workflowID)
+	if err != nil {
+		return Workflow{}, err
+	}
+	wf.Definition = &def
+	return wf, nil
+}
+
+// List returns the workspace's workflows, newest first.
+func (s *Service) List(ctx context.Context, userID, workspaceID string) ([]Workflow, error) {
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, workspace_id::text, name, status, current_version, created_at, updated_at
+		 FROM workflows WHERE workspace_id = $1
+		 ORDER BY updated_at DESC`,
+		workspaceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list workflows: %w", err)
+	}
+	defer rows.Close()
+	items := []Workflow{}
+	for rows.Next() {
+		var wf Workflow
+		if err := rows.Scan(&wf.ID, &wf.WorkspaceID, &wf.Name, &wf.Status, &wf.CurrentVersion, &wf.CreatedAt, &wf.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan workflow: %w", err)
+		}
+		items = append(items, wf)
+	}
+	return items, rows.Err()
+}
+
+// StartRun enqueues a manual run. Only ready workflows can run.
+func (s *Service) StartRun(ctx context.Context, userID, workspaceID, workflowID string) (Run, error) {
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return Run{}, err
+	}
+	wf, _, err := s.load(ctx, workspaceID, workflowID)
+	if err != nil {
+		return Run{}, err
+	}
+	if wf.Status != "ready" {
+		return Run{}, ErrNotReady
+	}
+	return s.enqueueRun(ctx, wf, "manual", map[string]any{"actorUserId": userID})
+}
+
+// enqueueRun inserts a queued run plus pending step rows for every node,
+// in execution order. The worker picks it up from there.
+func (s *Service) enqueueRun(ctx context.Context, wf Workflow, triggerType string, payload map[string]any) (Run, error) {
+	def := wf.Definition
+	if def == nil {
+		return Run{}, errors.New("definition missing")
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Run{}, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var run Run
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO workflow_runs (workflow_id, workspace_id, version, trigger_type, trigger_payload)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id::text, workflow_id::text, workspace_id::text, version, status, trigger_type, trigger_payload, created_at`,
+		wf.ID, wf.WorkspaceID, wf.CurrentVersion, triggerType, payload,
+	).Scan(&run.ID, &run.WorkflowID, &run.WorkspaceID, &run.Version, &run.Status, &run.TriggerType, &run.TriggerPayload, &run.CreatedAt); err != nil {
+		return Run{}, fmt.Errorf("insert run: %w", err)
+	}
+
+	for i, node := range def.Order() {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO workflow_steps (run_id, seq, node_id, node_type) VALUES ($1, $2, $3, $4)`,
+			run.ID, i+1, node.ID, node.Type,
+		); err != nil {
+			return Run{}, fmt.Errorf("insert step: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Run{}, fmt.Errorf("commit: %w", err)
+	}
+	return run, nil
+}
+
+// ListRuns returns a workflow's runs, newest first.
+func (s *Service) ListRuns(ctx context.Context, userID, workspaceID, workflowID string) ([]Run, error) {
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return nil, err
+	}
+	if _, _, err := s.load(ctx, workspaceID, workflowID); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id::text, workflow_id::text, workspace_id::text, version, status, trigger_type, trigger_payload, error, started_at, finished_at, created_at
+		 FROM workflow_runs WHERE workflow_id = $1
+		 ORDER BY created_at DESC LIMIT 100`,
+		workflowID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	defer rows.Close()
+	items := []Run{}
+	for rows.Next() {
+		var r Run
+		if err := rows.Scan(&r.ID, &r.WorkflowID, &r.WorkspaceID, &r.Version, &r.Status, &r.TriggerType, &r.TriggerPayload, &r.Error, &r.StartedAt, &r.FinishedAt, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan run: %w", err)
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+// GetRun returns a run with its steps.
+func (s *Service) GetRun(ctx context.Context, userID, workspaceID, workflowID, runID string) (Run, []Step, error) {
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return Run{}, nil, err
+	}
+	if _, _, err := s.load(ctx, workspaceID, workflowID); err != nil {
+		return Run{}, nil, err
+	}
+	var r Run
+	err := s.pool.QueryRow(ctx,
+		`SELECT id::text, workflow_id::text, workspace_id::text, version, status, trigger_type, trigger_payload, error, started_at, finished_at, created_at
+		 FROM workflow_runs WHERE id = $1 AND workflow_id = $2`,
+		runID, workflowID,
+	).Scan(&r.ID, &r.WorkflowID, &r.WorkspaceID, &r.Version, &r.Status, &r.TriggerType, &r.TriggerPayload, &r.Error, &r.StartedAt, &r.FinishedAt, &r.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Run{}, nil, ErrRunNotFound
+	}
+	if err != nil {
+		return Run{}, nil, fmt.Errorf("get run: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT seq, node_id, node_type, status, input, output, error, started_at, finished_at
+		 FROM workflow_steps WHERE run_id = $1 ORDER BY seq`,
+		runID,
+	)
+	if err != nil {
+		return Run{}, nil, fmt.Errorf("list steps: %w", err)
+	}
+	defer rows.Close()
+	steps := []Step{}
+	for rows.Next() {
+		var st Step
+		if err := rows.Scan(&st.Seq, &st.NodeID, &st.NodeType, &st.Status, &st.Input, &st.Output, &st.Error, &st.StartedAt, &st.FinishedAt); err != nil {
+			return Run{}, nil, fmt.Errorf("scan step: %w", err)
+		}
+		steps = append(steps, st)
+	}
+	return r, steps, rows.Err()
+}
+
+// load fetches a workflow and its current definition, enforcing workspace scope.
+func (s *Service) load(ctx context.Context, workspaceID, workflowID string) (Workflow, Definition, error) {
+	var wf Workflow
+	var raw []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT w.id::text, w.workspace_id::text, w.name, w.status, w.current_version, w.created_at, w.updated_at, v.definition
+		 FROM workflows w
+		 JOIN workflow_versions v ON v.workflow_id = w.id AND v.version = w.current_version
+		 WHERE w.id = $1 AND w.workspace_id = $2`,
+		workflowID, workspaceID,
+	).Scan(&wf.ID, &wf.WorkspaceID, &wf.Name, &wf.Status, &wf.CurrentVersion, &wf.CreatedAt, &wf.UpdatedAt, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Workflow{}, Definition{}, ErrWorkflowNotFound
+	}
+	if err != nil {
+		return Workflow{}, Definition{}, fmt.Errorf("load workflow: %w", err)
+	}
+	var def Definition
+	if err := json.Unmarshal(raw, &def); err != nil {
+		return Workflow{}, Definition{}, fmt.Errorf("decode definition: %w", err)
+	}
+	wf.Definition = &def
+	return wf, def, nil
+}
+
+func (s *Service) requireMember(ctx context.Context, userID, workspaceID string) error {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2)`,
+		workspaceID, userID,
+	).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check membership: %w", err)
+	}
+	if !exists {
+		return ErrForbidden
+	}
+	return nil
+}

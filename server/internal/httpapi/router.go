@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/orbit-org/orbit/server/internal/automation"
 	"github.com/orbit-org/orbit/server/internal/demo"
 	"github.com/orbit-org/orbit/server/internal/events"
 	"github.com/orbit-org/orbit/server/internal/identity"
@@ -23,6 +24,7 @@ type Services struct {
 	Modules    *modules.Service
 	Demo       *demo.Service
 	Events     *events.Service
+	Automation *automation.Service
 }
 
 // NewRouter builds the full API handler with standard middleware applied.
@@ -55,6 +57,7 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string,
 	svcs.Modules.Handlers(wsAPI)
 	svcs.Demo.Handlers(wsAPI)
 	svcs.Events.Handlers(wsAPI)
+	svcs.Automation.Handlers(wsAPI)
 	api.Handle("/v1/workspaces", svcs.Identity.RequireUser(wsAPI))
 	api.Handle("/v1/workspaces/", svcs.Identity.RequireUser(wsAPI))
 
