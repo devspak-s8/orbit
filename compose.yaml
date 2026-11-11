@@ -1,3 +1,14 @@
+# Full ORBIT stack: `docker compose up -d` runs the platform.
+#
+#   web (nginx, :8081)  ->  api (Go, internal)  ->  db (postgres)
+#
+# Port map (host:container):
+#   8081:80    web UI + API proxy
+#   8082:8080  API, for CLI/tools that talk to the API directly
+#   5434:5432  PostgreSQL
+#
+# Day-to-day development against a local database only:
+#   docker compose up -d db
 services:
   db:
     image: postgres:17-alpine
@@ -14,6 +25,34 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    environment:
+      ORBIT_HTTP_ADDR: ":8080"
+      ORBIT_DATABASE_URL: postgres://orbit:orbit@db:5432/orbit?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8082:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8081:80"
 
 volumes:
   orbit-db:

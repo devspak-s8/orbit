@@ -10,6 +10,9 @@ server/bin/
 .env
 .env.local
 
+# Local database backups
+backups/
+
 # OS / editor
 .DS_Store
 Thumbs.db

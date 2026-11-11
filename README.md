@@ -4,56 +4,56 @@
 
 ORBIT replaces a stack of disconnected subscriptions (task management, automation, data, docs) with one platform: independent modules sharing a single login, one data model, and a built-in automation engine. A task event in one module can trigger a workflow that updates data in another — natively, without glue code.
 
-> **Status: pre-alpha.** The repository currently contains the platform skeleton: Go API server, React web shell, PostgreSQL schema, and CI. See [PLAN.md](PLAN.md) for the build plan and [the roadmap](docs/ROADMAP.md) for what ships next.
+> **Status: pre-alpha (v0.1.0-alpha).** The platform core is working end to end: identity, workspaces, a module system with install/enable lifecycle, a platform event log, and a durable workflow engine with event triggers and HTTP actions. The first user-facing module (Work Management) is next. See the [roadmap](docs/ROADMAP.md) and [plan](PLAN.md).
 
-## Stack
+## What works today
 
-| Layer | Technology |
-|---|---|
-| Backend | Go |
-| Frontend | React + TypeScript + Tailwind CSS |
-| Database | PostgreSQL |
-| Deployment | Docker Compose |
-| Licence | Apache 2.0 |
+- **Accounts** — signup, login, sessions (Argon2id, server-side revocable sessions, rate limiting, audit log)
+- **Workspaces** — tenant-isolated environments; cross-workspace access is enforced at the data layer
+- **Modules** — manifest-based registry, install → enable → disable → uninstall lifecycle (owner-only), UI registration, and a first module proving the pipeline
+- **Event log** — transactional, workspace-scoped events
+- **Automation engine** — JSON workflow definitions with validation (drafts never execute), event and manual triggers, HTTP/log nodes, per-node retries and timeouts, per-step durable execution history, and restart recovery that resumes interrupted runs
+
+## Run the full stack
+
+Requires Docker with Compose:
+
+```bash
+git clone https://github.com/devspak-s8/orbit.git
+cd orbit
+docker compose up -d
+```
+
+- Web UI: http://localhost:8081
+- API: http://localhost:8082/healthz
+- PostgreSQL: `localhost:5434` (user `orbit`, password `orbit`, db `orbit`)
+
+The API applies database migrations automatically at startup.
 
 ## Development
 
-Prerequisites: Go 1.26+, Node 22+, Docker with Compose.
-
-### 1. Start the database
+Prerequisites: Go 1.26+, Node 22+, Docker.
 
 ```bash
-docker compose up -d db
-```
+docker compose up -d db   # database only
 
-### 2. Start the API server
-
-```bash
 cd server
-go run ./cmd/api
-```
+go run ./cmd/api          # API on :8080 (uses localhost:5434)
 
-The API listens on `http://localhost:8080`. Migrations apply automatically at startup.
-
-### 3. Start the web app
-
-```bash
 cd apps/web
 npm install
-npm run dev
+npm run dev               # web on :5173, proxies /v1 to :8080
 ```
 
-The web app runs on `http://localhost:5173` and proxies `/v1` to the API server.
+### Tests
 
-### 4. Check it works
+```bash
+cd server && go test ./...
+```
 
-- API health: `http://localhost:8080/healthz`
-- API ping: `http://localhost:8080/v1/ping`
-- Web shell: `http://localhost:5173`
+Requires the dev database (`docker compose up -d db`). CI runs the same suite against a fresh PostgreSQL on every push.
 
-## Configuration
-
-The server reads configuration from environment variables:
+### Configuration
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -61,24 +61,31 @@ The server reads configuration from environment variables:
 | `ORBIT_DATABASE_URL` | `postgres://orbit:orbit@localhost:5434/orbit?sslmode=disable` | PostgreSQL connection string |
 | `ORBIT_CORS_ORIGINS` | `http://localhost:5173` | Allowed browser origins (comma-separated) |
 
-## Testing
+## Backups
+
+The database is the single source of truth; backing it up backs up everything.
 
 ```bash
-cd server && go vet ./... && go test ./...
-cd apps/web && npm run build
+# Backup
+docker compose exec -T db pg_dump -U orbit -d orbit > backups/orbit-$(date +%Y%m%d-%H%M%S).sql
+
+# Restore (into a fresh volume: docker compose down -v, up -d db, then)
+cat backups/orbit-YYYYMMDD-HHMMSS.sql | docker compose exec -T db psql -U orbit -d orbit
 ```
 
-CI runs the same checks on every push.
+The restore path is verified: a dump of the alpha schema (15 tables) restores cleanly with all data intact.
 
-## Repository layout
+## Architecture
 
 ```
-server/           Go API server
-  cmd/api/        Entry point
-  internal/       Config, database, HTTP API
-apps/web/         React web application
-compose.yaml      Development database
+apps/web/         React + TypeScript + Tailwind (Vite)
+server/           Go API — domains: identity, workspaces, modules, events,
+                  automation (workflow engine), demo (first module)
+compose.yaml      Full stack: web (nginx) -> api (Go) -> db (PostgreSQL)
+docs/adr/         Architecture decision records
 ```
+
+Key decisions (see [docs/adr](docs/adr)): modular monolith, standard-library HTTP, PostgreSQL as the only infrastructure, workflows as durable Postgres-backed executions, event publishing transactional with the change that produced it.
 
 ## Licence
 
