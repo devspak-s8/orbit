@@ -10,7 +10,8 @@ ORBIT replaces a stack of disconnected subscriptions (task management, automatio
 
 - **Accounts** — signup, login, sessions (Argon2id, server-side revocable sessions, rate limiting, audit log)
 - **Workspaces** — tenant-isolated environments; cross-workspace access is enforced at the data layer
-- **Modules** — manifest-based registry, install → enable → disable → uninstall lifecycle (owner-only), UI registration, and a first module proving the pipeline
+- **Work Management** — the first product module: projects, tasks, boards, assignments, due dates, priorities; lifecycle events feed the automation engine
+- **Modules** — manifest-based registry, install → enable → disable → uninstall lifecycle (owner-only), UI registration
 - **Event log** — transactional, workspace-scoped events
 - **Automation engine** — JSON workflow definitions with validation (drafts never execute), event and manual triggers, HTTP/log nodes, per-node retries and timeouts, per-step durable execution history, and restart recovery that resumes interrupted runs
 
@@ -80,9 +81,11 @@ The restore path is verified: a dump of the alpha schema (15 tables) restores cl
 ```
 apps/web/         React + TypeScript + Tailwind (Vite)
 server/           Go API — domains: identity, workspaces, modules, events,
-                  automation (workflow engine), demo (first module)
+                  automation (workflow engine), work (Work Management),
+                  demo (reference module)
 compose.yaml      Full stack: web (nginx) -> api (Go) -> db (PostgreSQL)
 docs/adr/         Architecture decision records
+docs/plans/       Implementation plans (e.g. Work Management)
 ```
 
 Key decisions (see [docs/adr](docs/adr)): modular monolith, standard-library HTTP, PostgreSQL as the only infrastructure, workflows as durable Postgres-backed executions, event publishing transactional with the change that produced it.

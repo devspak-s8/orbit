@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { logout as apiLogout, me as fetchMe, type User } from './lib/api'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
@@ -8,6 +8,8 @@ import WorkspaceHome from './pages/WorkspaceHome'
 import ModuleDemo from './pages/ModuleDemo'
 import Workflows from './pages/Workflows'
 import WorkflowDetail from './pages/WorkflowDetail'
+import WorkModule from './pages/WorkModule'
+import ProjectBoard from './pages/ProjectBoard'
 
 function Home({ user }: { user: User }) {
   return (
@@ -62,6 +64,25 @@ function Shell({
   )
 }
 
+function ModuleRoute() {
+  const { id, moduleId } = useParams<{ id: string; moduleId: string }>()
+  switch (moduleId) {
+    case 'orbit.work':
+      return <WorkModule />
+    case 'orbit.demo':
+      return <ModuleDemo />
+    default:
+      return (
+        <div className="space-y-4">
+          <p className="text-sm text-neutral-500">Unknown or uninstalled module.</p>
+          <Link to={`/workspaces/${id}`} className="text-sm text-neutral-400 underline">
+            ← Back to workspace
+          </Link>
+        </div>
+      )
+  }
+}
+
 export default function App() {
   // undefined = session check in flight, null = signed out, User = signed in.
   const [me, setMe] = useState<User | null | undefined>(undefined)
@@ -104,7 +125,9 @@ export default function App() {
         <Route path="/workspaces/:id" element={<WorkspaceHome />} />
         <Route path="/workspaces/:id/workflows" element={<Workflows />} />
         <Route path="/workspaces/:id/workflows/:wid" element={<WorkflowDetail />} />
-        <Route path="/workspaces/:id/modules/:moduleId" element={<ModuleDemo />} />
+        <Route path="/workspaces/:id/modules/:moduleId" element={<ModuleRoute />} />
+        <Route path="/workspaces/:id/work" element={<WorkModule />} />
+        <Route path="/workspaces/:id/work/:pid" element={<ProjectBoard />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Shell>

@@ -1,0 +1,13 @@
+{
+  "id": "orbit.work",
+  "name": "Work Management",
+  "version": "0.2.0",
+  "apiVersion": "1",
+  "description": "Projects and tasks: boards, assignments, due dates — with native automation events.",
+  "permissions": ["workspace.read", "events.write"],
+  "dependencies": ["orbit.core"],
+  "events": ["project.created", "task.created", "task.completed", "task.reopened", "task.assigned"],
+  "entrypoints": {
+    "frontend": "frontend"
+  }
+}

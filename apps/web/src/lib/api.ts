@@ -264,3 +264,108 @@ export function getWorkflowRun(
 ): Promise<{ run: WorkflowRun; steps: WorkflowStep[] }> {
   return api(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/runs/${runId}`)
 }
+
+export interface Member {
+  userId: string
+  email: string
+  displayName: string
+  role: string
+  createdAt: string
+}
+
+export interface TaskCounts {
+  todo: number
+  inProgress: number
+  done: number
+}
+
+export interface Project {
+  id: string
+  workspaceId: string
+  name: string
+  description: string
+  createdBy: string
+  taskCounts: TaskCounts
+  createdAt: string
+  updatedAt: string
+}
+
+export type TaskStatus = 'todo' | 'in_progress' | 'done'
+
+export interface Task {
+  id: string
+  projectId: string
+  workspaceId: string
+  title: string
+  description: string
+  status: TaskStatus
+  priority: 'low' | 'medium' | 'high' | 'urgent'
+  assigneeId: string
+  assigneeName: string
+  dueDate: string | null
+  position: number
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export function listMembers(workspaceId: string): Promise<Member[]> {
+  return api<{ members: Member[] }>(`/v1/workspaces/${workspaceId}/members`).then((r) => r.members)
+}
+
+export function listProjects(workspaceId: string): Promise<Project[]> {
+  return api<{ projects: Project[] }>(`/v1/workspaces/${workspaceId}/projects`).then((r) => r.projects)
+}
+
+export function createProject(workspaceId: string, name: string, description: string): Promise<Project> {
+  return api<{ project: Project }>(`/v1/workspaces/${workspaceId}/projects`, {
+    method: 'POST',
+    body: JSON.stringify({ name, description }),
+  }).then((r) => r.project)
+}
+
+export function getProject(
+  workspaceId: string,
+  projectId: string,
+): Promise<{ project: Project; tasks: Task[] }> {
+  return api(`/v1/workspaces/${workspaceId}/projects/${projectId}`)
+}
+
+export interface TaskInput {
+  title: string
+  description?: string
+  priority?: string
+  assigneeId?: string
+  dueDate?: string
+}
+
+export function createTask(workspaceId: string, projectId: string, input: TaskInput): Promise<Task> {
+  return api<{ task: Task }>(`/v1/workspaces/${workspaceId}/projects/${projectId}/tasks`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }).then((r) => r.task)
+}
+
+export function updateTask(
+  workspaceId: string,
+  taskId: string,
+  patch: Partial<Pick<Task, 'title' | 'description' | 'priority' | 'assigneeId'>> & { dueDate?: string },
+): Promise<Task> {
+  return api<{ task: Task }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  }).then((r) => r.task)
+}
+
+export function setTaskStatus(workspaceId: string, taskId: string, status: TaskStatus): Promise<Task> {
+  return api<{ task: Task }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  }).then((r) => r.task)
+}
+
+export function deleteTask(workspaceId: string, taskId: string): Promise<void> {
+  return api<{ status: string }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}`, {
+    method: 'DELETE',
+  }).then(() => undefined)
+}

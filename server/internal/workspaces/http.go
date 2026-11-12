@@ -16,6 +16,7 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("GET /v1/workspaces", s.handleList)
 	api.HandleFunc("POST /v1/workspaces", s.handleCreate)
 	api.HandleFunc("GET /v1/workspaces/{id}", s.handleGet)
+	api.HandleFunc("GET /v1/workspaces/{id}/members", s.handleListMembers)
 }
 
 func (s *Service) handleList(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +34,28 @@ func (s *Service) handleList(w http.ResponseWriter, r *http.Request) {
 		items = []Workspace{}
 	}
 	apijson.WriteJSON(w, http.StatusOK, map[string]any{"workspaces": items})
+}
+
+func (s *Service) handleListMembers(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	items, err := s.ListMembers(r.Context(), user.ID, r.PathValue("id"))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			apijson.WriteError(w, http.StatusNotFound, "not_found", "workspace not found")
+		default:
+			apijson.WriteError(w, http.StatusInternalServerError, "internal", "an internal error occurred")
+		}
+		return
+	}
+	if items == nil {
+		items = []Member{}
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"members": items})
 }
 
 func (s *Service) handleCreate(w http.ResponseWriter, r *http.Request) {

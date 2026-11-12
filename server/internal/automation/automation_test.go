@@ -18,13 +18,13 @@ import (
 )
 
 type env struct {
-	svc    *Service
-	runner *Runner
-	events *events.Service
-	userID string
-	wsID   string
+	svc     *Service
+	runner  *Runner
+	events  *events.Service
+	userID  string
+	wsID    string
 	cleanup func()
-	ctx    context.Context
+	ctx     context.Context
 }
 
 func setup(t *testing.T) *env {
@@ -66,13 +66,13 @@ func setup(t *testing.T) *env {
 	}
 
 	return &env{
-		svc:    NewService(pool),
-		runner: NewRunner(pool),
-		events: eventsSvc,
-		userID: user.ID,
-		wsID:   ws.ID,
+		svc:     NewService(pool),
+		runner:  NewRunner(pool),
+		events:  eventsSvc,
+		userID:  user.ID,
+		wsID:    ws.ID,
 		cleanup: cleanup,
-		ctx:    ctx,
+		ctx:     ctx,
 	}
 }
 

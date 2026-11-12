@@ -18,6 +18,7 @@ import (
 	"github.com/orbit-org/orbit/server/internal/httpapi"
 	"github.com/orbit-org/orbit/server/internal/identity"
 	"github.com/orbit-org/orbit/server/internal/modules"
+	"github.com/orbit-org/orbit/server/internal/work"
 	"github.com/orbit-org/orbit/server/internal/workspaces"
 )
 
@@ -57,11 +58,13 @@ func main() {
 	mods.RegisterUninstallHook("orbit.demo", demoSvc.Cleanup)
 	automationSvc := automation.NewService(pool)
 	runner := automation.NewRunner(pool)
+	workSvc := work.NewService(pool, eventsSvc, mods)
 
 	if err := mods.Seed(ctx); err != nil {
 		logger.Error("seeding module registry", "error", err)
 		os.Exit(1)
 	}
+	mods.RegisterUninstallHook(work.ModuleID, workSvc.Cleanup)
 
 	// The automation worker runs in-process for the alpha (ADR-0004);
 	// its queue is durable so a separate process can take over later.
@@ -74,6 +77,7 @@ func main() {
 		Demo:       demoSvc,
 		Events:     eventsSvc,
 		Automation: automationSvc,
+		Work:       workSvc,
 	}
 
 	srv := &http.Server{

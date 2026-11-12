@@ -14,6 +14,7 @@ import (
 	"github.com/orbit-org/orbit/server/internal/events"
 	"github.com/orbit-org/orbit/server/internal/identity"
 	"github.com/orbit-org/orbit/server/internal/modules"
+	"github.com/orbit-org/orbit/server/internal/work"
 	"github.com/orbit-org/orbit/server/internal/workspaces"
 )
 
@@ -25,6 +26,7 @@ type Services struct {
 	Demo       *demo.Service
 	Events     *events.Service
 	Automation *automation.Service
+	Work       *work.Service
 }
 
 // NewRouter builds the full API handler with standard middleware applied.
@@ -58,6 +60,7 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string,
 	svcs.Demo.Handlers(wsAPI)
 	svcs.Events.Handlers(wsAPI)
 	svcs.Automation.Handlers(wsAPI)
+	svcs.Work.Handlers(wsAPI)
 	api.Handle("/v1/workspaces", svcs.Identity.RequireUser(wsAPI))
 	api.Handle("/v1/workspaces/", svcs.Identity.RequireUser(wsAPI))
 

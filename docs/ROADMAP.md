@@ -8,10 +8,10 @@ ORBIT's goal is a free, self-hosted replacement for a stack of disconnected subs
 
 | Milestone | Target | What it is |
 |---|---|---|
-| `v0.1.0-alpha` | End of 2026 | Platform skeleton + Tasks module: auth, workspaces, permissions, module system, minimal automation (manual trigger + HTTP action), Docker Compose |
-| Alpha 2 | Feb 2027 | Work Management usable: projects, tasks, boards, assignments; first task-event automations (email/webhook) |
-| Alpha 3 | Apr 2027 | Automation hardened: webhooks, schedules, retries, execution UI |
-| `v0.2.0-beta` | Jul 2027 | Data module: tables, forms, CSV, "form → record → workflow" |
+| `v0.1.0-alpha` | Nov 2026 ✅ | Platform skeleton + Demo module: auth, workspaces, permissions, module system, minimal automation, Docker Compose |
+| Alpha 2 | Dec 2026 | Work Management: projects, tasks, boards, assignments, due dates; task lifecycle events drive workflows |
+| Alpha 3 | Feb 2027 | Automation hardened: webhooks, schedules, retries, execution UI; first task-event automations (email) |
+| `v0.2.0-beta` | Apr 2027 | Data module: tables, forms, CSV, "form → record → workflow" |
 | `v1.0.0` | Mid 2027 | Docs-lite, backup/restore verified, security audit, install polish |
 
 ## Explicitly deferred (post-1.0)

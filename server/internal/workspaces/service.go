@@ -189,3 +189,40 @@ func (s *Service) Membership(ctx context.Context, userID, workspaceID string) (s
 	}
 	return role, nil
 }
+
+// Member is a workspace member as seen in member lists.
+type Member struct {
+	UserID      string    `json:"userId"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"displayName"`
+	Role        string    `json:"role"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+// ListMembers returns the workspace's members. The caller must be a member.
+func (s *Service) ListMembers(ctx context.Context, callerID, workspaceID string) ([]Member, error) {
+	if _, err := s.Membership(ctx, callerID, workspaceID); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT u.id::text, u.email, u.display_name, m.role, m.created_at
+		 FROM memberships m
+		 JOIN users u ON u.id = m.user_id
+		 WHERE m.workspace_id = $1
+		 ORDER BY m.created_at`,
+		workspaceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list members: %w", err)
+	}
+	defer rows.Close()
+	items := []Member{}
+	for rows.Next() {
+		var m Member
+		if err := rows.Scan(&m.UserID, &m.Email, &m.DisplayName, &m.Role, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan member: %w", err)
+		}
+		items = append(items, m)
+	}
+	return items, rows.Err()
+}
