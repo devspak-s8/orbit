@@ -2,6 +2,8 @@ package automation
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,8 +33,13 @@ type Workflow struct {
 	Status         string      `json:"status"`
 	CurrentVersion int         `json:"currentVersion"`
 	Definition     *Definition `json:"definition,omitempty"`
-	CreatedAt      time.Time   `json:"createdAt"`
-	UpdatedAt      time.Time   `json:"updatedAt"`
+	// WebhookToken is the secret path segment for webhook-triggered
+	// workflows; present once the workflow is validated.
+	WebhookToken string `json:"webhookToken,omitempty"`
+	// NextDueAt is the durable schedule cursor for schedule triggers.
+	NextDueAt *time.Time `json:"nextDueAt,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 // Run is one execution of a workflow.
@@ -131,6 +138,32 @@ func (s *Service) Validate(ctx context.Context, userID, workspaceID, workflowID 
 	if err := def.Validate(); err != nil {
 		return Workflow{}, fmt.Errorf("%w: %s", ErrInvalidDefinition, err)
 	}
+
+	// Trigger activation side effects (ADR-0005): webhook triggers get
+	// their secret token at validation; schedule triggers get their first
+	// due time. Both live on the workflow row.
+	sets := []string{"status = 'ready'", "updated_at = now()"}
+	args := []any{workflowID}
+	switch def.Trigger.Type {
+	case "webhook":
+		if wf.WebhookToken == "" {
+			token, err := newWebhookToken()
+			if err != nil {
+				return Workflow{}, err
+			}
+			sets = append(sets, fmt.Sprintf("webhook_token = $%d", len(args)+1))
+			args = append(args, token)
+			wf.WebhookToken = token
+		}
+	case "schedule":
+		// Re-validating resets the cursor: the next fire is a full
+		// interval away, never immediate.
+		sets = append(sets, fmt.Sprintf("next_due_at = now() + make_interval(secs => $%d)", len(args)+1))
+		args = append(args, def.Trigger.IntervalSec)
+		due := time.Now().Add(time.Duration(def.Trigger.IntervalSec) * time.Second)
+		wf.NextDueAt = &due
+	}
+
 	if _, err := s.pool.Exec(ctx,
 		`UPDATE workflow_versions SET validated_at = now()
 		 WHERE workflow_id = $1 AND version = $2`,
@@ -139,8 +172,8 @@ func (s *Service) Validate(ctx context.Context, userID, workspaceID, workflowID 
 		return Workflow{}, fmt.Errorf("mark validated: %w", err)
 	}
 	if _, err := s.pool.Exec(ctx,
-		`UPDATE workflows SET status = 'ready', updated_at = now() WHERE id = $1`,
-		workflowID,
+		"UPDATE workflows SET "+strings.Join(sets, ", ")+" WHERE id = $1",
+		args...,
 	); err != nil {
 		return Workflow{}, fmt.Errorf("set ready: %w", err)
 	}
@@ -319,18 +352,24 @@ func (s *Service) GetRun(ctx context.Context, userID, workspaceID, workflowID, r
 func (s *Service) load(ctx context.Context, workspaceID, workflowID string) (Workflow, Definition, error) {
 	var wf Workflow
 	var raw []byte
+	var token *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT w.id::text, w.workspace_id::text, w.name, w.status, w.current_version, w.created_at, w.updated_at, v.definition
+		`SELECT w.id::text, w.workspace_id::text, w.name, w.status, w.current_version,
+		        w.webhook_token, w.next_due_at, w.created_at, w.updated_at, v.definition
 		 FROM workflows w
 		 JOIN workflow_versions v ON v.workflow_id = w.id AND v.version = w.current_version
 		 WHERE w.id = $1 AND w.workspace_id = $2`,
 		workflowID, workspaceID,
-	).Scan(&wf.ID, &wf.WorkspaceID, &wf.Name, &wf.Status, &wf.CurrentVersion, &wf.CreatedAt, &wf.UpdatedAt, &raw)
+	).Scan(&wf.ID, &wf.WorkspaceID, &wf.Name, &wf.Status, &wf.CurrentVersion,
+		&token, &wf.NextDueAt, &wf.CreatedAt, &wf.UpdatedAt, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Workflow{}, Definition{}, ErrWorkflowNotFound
 	}
 	if err != nil {
 		return Workflow{}, Definition{}, fmt.Errorf("load workflow: %w", err)
+	}
+	if token != nil {
+		wf.WebhookToken = *token
 	}
 	var def Definition
 	if err := json.Unmarshal(raw, &def); err != nil {
@@ -338,6 +377,53 @@ func (s *Service) load(ctx context.Context, workspaceID, workflowID string) (Wor
 	}
 	wf.Definition = &def
 	return wf, def, nil
+}
+
+// newWebhookToken generates the secret path segment for a webhook trigger:
+// 32 random bytes, base64url (43 characters).
+func newWebhookToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate webhook token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// EnqueueWebhook resolves a webhook token to a ready workflow and enqueues a
+// run carrying the delivered payload. Unknown tokens are indistinguishable
+// from missing ones (no existence leak).
+func (s *Service) EnqueueWebhook(ctx context.Context, token string, payload map[string]any) (Run, Workflow, error) {
+	var wf Workflow
+	var raw []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT w.id::text, w.workspace_id::text, w.name, w.status, w.current_version,
+		        w.created_at, w.updated_at, v.definition
+		 FROM workflows w
+		 JOIN workflow_versions v ON v.workflow_id = w.id AND v.version = w.current_version
+		 WHERE w.webhook_token = $1 AND w.status = 'ready'`,
+		token,
+	).Scan(&wf.ID, &wf.WorkspaceID, &wf.Name, &wf.Status, &wf.CurrentVersion,
+		&wf.CreatedAt, &wf.UpdatedAt, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Run{}, Workflow{}, ErrWorkflowNotFound
+	}
+	if err != nil {
+		return Run{}, Workflow{}, fmt.Errorf("lookup webhook: %w", err)
+	}
+	var def Definition
+	if err := json.Unmarshal(raw, &def); err != nil {
+		return Run{}, Workflow{}, fmt.Errorf("decode definition: %w", err)
+	}
+	// Defense in depth: the trigger behind this token really is a webhook.
+	if def.Trigger.Type != "webhook" {
+		return Run{}, Workflow{}, ErrWorkflowNotFound
+	}
+	wf.Definition = &def
+	run, err := s.enqueueRun(ctx, wf, "webhook", payload)
+	if err != nil {
+		return Run{}, Workflow{}, err
+	}
+	return run, wf, nil
 }
 
 func (s *Service) requireMember(ctx context.Context, userID, workspaceID string) error {

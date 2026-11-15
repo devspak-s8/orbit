@@ -11,6 +11,7 @@ export default defineConfig({
     proxy: {
       '/v1': 'http://localhost:8080',
       '/healthz': 'http://localhost:8080',
+      '/hooks': 'http://localhost:8080',
     },
   },
 })

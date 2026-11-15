@@ -5,6 +5,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,6 +19,19 @@ type Config struct {
 	CORSOrigins []string
 	// SessionTTL is the lifetime of an authenticated session.
 	SessionTTL time.Duration
+	// SMTP configures outbound email for the automation engine. Server-level
+	// by design for the alpha (ADR-0005): the self-hoster configures the
+	// relay once; an empty host disables the email node with a clear error.
+	SMTP SMTPConfig
+}
+
+// SMTPConfig is the outbound email relay configuration.
+type SMTPConfig struct {
+	Host string
+	Port int
+	User string
+	Pass string
+	From string
 }
 
 func Load() Config {
@@ -26,12 +40,28 @@ func Load() Config {
 		DatabaseURL: envOr("ORBIT_DATABASE_URL", "postgres://orbit:orbit@localhost:5434/orbit?sslmode=disable"),
 		CORSOrigins: splitList(envOr("ORBIT_CORS_ORIGINS", "http://localhost:5173")),
 		SessionTTL:  30 * 24 * time.Hour,
+		SMTP: SMTPConfig{
+			Host: envOr("ORBIT_SMTP_HOST", ""),
+			Port: envInt("ORBIT_SMTP_PORT", 587),
+			User: envOr("ORBIT_SMTP_USER", ""),
+			Pass: envOr("ORBIT_SMTP_PASS", ""),
+			From: envOr("ORBIT_SMTP_FROM", "orbit@localhost"),
+		},
 	}
 }
 
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return fallback
 }

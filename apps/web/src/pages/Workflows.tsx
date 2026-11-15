@@ -10,30 +10,60 @@ import {
   type WorkflowDefinition,
 } from '../lib/api'
 
-const exampleDefinition: WorkflowDefinition = {
-  trigger: { type: 'event', eventType: 'demo.record.created' },
-  nodes: [
-    {
-      id: 'notify',
-      type: 'http',
-      config: {
-        method: 'GET',
-        url: 'http://localhost:8080/v1/ping',
-      },
+const templates: Record<string, { label: string; definition: WorkflowDefinition }> = {
+  event: {
+    label: 'On a platform event',
+    definition: {
+      trigger: { type: 'event', eventType: 'task.completed' },
+      nodes: [
+        { id: 'notify', type: 'http', config: { method: 'GET', url: 'http://localhost:8080/v1/ping' } },
+        { id: 'done', type: 'log', config: { message: 'workflow finished' } },
+      ],
+      edges: [
+        { from: 'trigger', to: 'notify' },
+        { from: 'notify', to: 'done' },
+      ],
     },
-    { id: 'done', type: 'log', config: { message: 'workflow finished' } },
-  ],
-  edges: [
-    { from: 'trigger', to: 'notify' },
-    { from: 'notify', to: 'done' },
-  ],
+  },
+  webhook: {
+    label: 'On an inbound webhook',
+    definition: {
+      trigger: { type: 'webhook' },
+      nodes: [
+        {
+          id: 'mail',
+          type: 'email',
+          config: { to: 'you@example.com', subject: 'New submission: {{payload.name}}', text: 'Received.' },
+        },
+      ],
+      edges: [{ from: 'trigger', to: 'mail' }],
+    },
+  },
+  schedule: {
+    label: 'On a schedule',
+    definition: {
+      trigger: { type: 'schedule', intervalSec: 300 },
+      nodes: [
+        { id: 'ping', type: 'http', config: { method: 'GET', url: 'http://localhost:8080/v1/ping' } },
+      ],
+      edges: [{ from: 'trigger', to: 'ping' }],
+    },
+  },
+  manual: {
+    label: 'Manual run',
+    definition: {
+      trigger: { type: 'manual' },
+      nodes: [{ id: 'hello', type: 'log', config: { message: 'hello' } }],
+      edges: [{ from: 'trigger', to: 'hello' }],
+    },
+  },
 }
 
 export default function Workflows() {
   const { id } = useParams<{ id: string }>()
   const [workflows, setWorkflows] = useState<Workflow[] | null>(null)
   const [name, setName] = useState('')
-  const [definition, setDefinition] = useState(JSON.stringify(exampleDefinition, null, 2))
+  const [definition, setDefinition] = useState(JSON.stringify(templates.event.definition, null, 2))
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -103,12 +133,26 @@ export default function Workflows() {
         </label>
         <label className="block text-sm">
           Definition (JSON)
+          <select
+            className="mt-1 rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm"
+            onChange={(e) => {
+              const tpl = templates[e.target.value]
+              if (tpl) setDefinition(JSON.stringify(tpl.definition, null, 2))
+            }}
+          >
+            <option value="">Start from a template…</option>
+            {Object.entries(templates).map(([key, tpl]) => (
+              <option key={key} value={key}>
+                {tpl.label}
+              </option>
+            ))}
+          </select>
           <textarea
             rows={12}
             spellCheck={false}
             value={definition}
             onChange={(e) => setDefinition(e.target.value)}
-            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-xs focus:border-neutral-500 focus:outline-none"
+            className="mt-2 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-xs focus:border-neutral-500 focus:outline-none"
           />
         </label>
         {error && <p className="text-sm text-red-400">{error}</p>}

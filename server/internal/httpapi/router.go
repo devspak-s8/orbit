@@ -66,6 +66,10 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string,
 
 	mux.Handle("/v1/", api)
 
+	// Webhook deliveries are top-level and unauthenticated: the secret is
+	// the token in the path. Rate-limited and audited in the handler.
+	svcs.Automation.HookHandlers(mux)
+
 	var h http.Handler = mux
 	h = withCORS(allowedOrigins, h)
 	h = withLogging(logger, h)

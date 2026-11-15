@@ -2,13 +2,49 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ApiError,
+  getWorkflow,
   getWorkflowRun,
   listWorkflowRuns,
   runWorkflow,
   validateWorkflow,
+  type Workflow,
   type WorkflowRun,
   type WorkflowStep,
 } from '../lib/api'
+
+function WebhookPanel({ workflow }: { workflow: Workflow }) {
+  const [copied, setCopied] = useState(false)
+  if (!workflow.webhookToken) return null
+  const url = `${window.location.origin}/hooks/${workflow.webhookToken}`
+  const curl = `curl -X POST -H "Content-Type: application/json" -d '{"hello":"world"}' ${url}`
+  return (
+    <div className="max-w-3xl rounded-lg border border-neutral-800 bg-neutral-900/50 p-4">
+      <h2 className="text-sm font-medium">Webhook URL</h2>
+      <p className="mt-1 text-xs text-neutral-500">
+        Any JSON POST to this URL fires the workflow. The secret is the URL — treat it like a password.
+      </p>
+      <div className="mt-3 flex items-center gap-2">
+        <code className="flex-1 overflow-x-auto rounded bg-neutral-950 px-3 py-2 font-mono text-xs text-emerald-400">
+          {url}
+        </code>
+        <button
+          onClick={() => {
+            void navigator.clipboard.writeText(url).then(() => {
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            })
+          }}
+          className="rounded border border-neutral-700 px-3 py-2 text-xs hover:border-neutral-500"
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <pre className="mt-3 overflow-x-auto rounded bg-neutral-950 p-3 font-mono text-xs text-neutral-400">
+        {curl}
+      </pre>
+    </div>
+  )
+}
 
 function statusColor(status: string): string {
   switch (status) {
@@ -27,12 +63,14 @@ function statusColor(status: string): string {
 export default function WorkflowDetail() {
   const { id, wid } = useParams<{ id: string; wid: string }>()
   const [runs, setRuns] = useState<WorkflowRun[] | null>(null)
+  const [workflow, setWorkflow] = useState<Workflow | null>(null)
   const [selected, setSelected] = useState<{ run: WorkflowRun; steps: WorkflowStep[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   function load() {
     if (!id || !wid) return
     listWorkflowRuns(id, wid).then(setRuns).catch(showError)
+    getWorkflow(id, wid).then(setWorkflow).catch(() => {})
   }
 
   function showError(err: unknown) {
@@ -75,6 +113,8 @@ export default function WorkflowDetail() {
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
+
+      {workflow && <WebhookPanel workflow={workflow} />}
 
       {runs === null ? (
         <p className="text-sm text-neutral-500">Loading runs…</p>

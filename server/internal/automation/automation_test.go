@@ -67,7 +67,7 @@ func setup(t *testing.T) *env {
 
 	return &env{
 		svc:     NewService(pool),
-		runner:  NewRunner(pool),
+		runner:  NewRunner(pool, config.SMTPConfig{}),
 		events:  eventsSvc,
 		userID:  user.ID,
 		wsID:    ws.ID,

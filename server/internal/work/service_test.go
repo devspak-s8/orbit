@@ -17,16 +17,16 @@ import (
 )
 
 type env struct {
-	svc     *Service
-	mods    *modules.Service
-	events  *events.Service
-	auto    *automation.Service
-	runner  *automation.Runner
-	userID  string
+	svc        *Service
+	mods       *modules.Service
+	events     *events.Service
+	auto       *automation.Service
+	runner     *automation.Runner
+	userID     string
 	outsiderID string
-	wsID    string
-	cleanup func()
-	ctx     context.Context
+	wsID       string
+	cleanup    func()
+	ctx        context.Context
 }
 
 func setup(t *testing.T) *env {
@@ -54,7 +54,7 @@ func setup(t *testing.T) *env {
 	eventsSvc := events.NewService(pool)
 	workSvc := NewService(pool, eventsSvc, mods)
 	autoSvc := automation.NewService(pool)
-	runner := automation.NewRunner(pool)
+	runner := automation.NewRunner(pool, config.SMTPConfig{})
 
 	email := fmt.Sprintf("work-%d@orbit.test", time.Now().UnixNano())
 	outsiderEmail := fmt.Sprintf("work-out-%d@orbit.test", time.Now().UnixNano())

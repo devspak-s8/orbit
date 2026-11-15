@@ -179,21 +179,30 @@ export interface Workflow {
   status: 'draft' | 'ready' | 'archived'
   currentVersion: number
   definition?: WorkflowDefinition
+  webhookToken?: string
+  nextDueAt?: string
   createdAt: string
   updatedAt: string
 }
 
 export interface WorkflowDefinition {
-  trigger: { type: 'event' | 'manual'; eventType?: string }
+  trigger: {
+    type: 'event' | 'manual' | 'webhook' | 'schedule'
+    eventType?: string
+    intervalSec?: number
+  }
   nodes: Array<{
     id: string
-    type: 'http' | 'log'
+    type: 'http' | 'log' | 'email'
     config: {
       method?: string
       url?: string
       headers?: Record<string, string>
       body?: Record<string, unknown>
       message?: string
+      to?: string
+      subject?: string
+      text?: string
       retries?: number
       timeoutMs?: number
     }
@@ -245,6 +254,12 @@ export function validateWorkflow(workspaceId: string, workflowId: string): Promi
   return api<{ workflow: Workflow }>(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/validate`, {
     method: 'POST',
   }).then((r) => r.workflow)
+}
+
+export function getWorkflow(workspaceId: string, workflowId: string): Promise<Workflow> {
+  return api<{ workflow: Workflow }>(`/v1/workspaces/${workspaceId}/workflows/${workflowId}`).then(
+    (r) => r.workflow,
+  )
 }
 
 export function runWorkflow(workspaceId: string, workflowId: string): Promise<WorkflowRun> {

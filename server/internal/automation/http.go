@@ -3,11 +3,66 @@ package automation
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/orbit-org/orbit/server/internal/apijson"
 	"github.com/orbit-org/orbit/server/internal/identity"
+	"github.com/orbit-org/orbit/server/internal/ratelimit"
 )
+
+// hookLimiter throttles webhook deliveries per source IP. Webhooks are
+// unauthenticated by design (the secret is the URL), so this is the front
+// line against scraping and replay abuse.
+var hookLimiter = ratelimit.New(60, time.Minute)
+
+// HookHandlers wires the top-level (unauthenticated) webhook routes onto
+// the root mux. Tokens carry the secret; every delivery is rate-limited
+// and audited.
+func (s *Service) HookHandlers(root *http.ServeMux) {
+	root.HandleFunc("POST /hooks/{token}", s.handleWebhook)
+}
+
+func (s *Service) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+	if !hookLimiter.Allow(ip) {
+		w.Header().Set("Retry-After", "60")
+		apijson.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many deliveries, try again later")
+		return
+	}
+
+	token := r.PathValue("token")
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var parsed any
+	if err := json.NewDecoder(r.Body).Decode(&parsed); err != nil {
+		// An empty body is a valid webhook: deliver an empty payload.
+		parsed = map[string]any{}
+	}
+	payload, ok := parsed.(map[string]any)
+	if !ok {
+		// Non-object bodies (strings, arrays, numbers) are wrapped so
+		// substitution still has something to read.
+		payload = map[string]any{"value": parsed}
+	}
+
+	run, wf, err := s.EnqueueWebhook(r.Context(), token, payload)
+	if err != nil {
+		if errors.Is(err, ErrWorkflowNotFound) {
+			// Unknown token, non-ready workflow, or a trigger that is not a
+			// webhook: identical response, no existence leak.
+			apijson.WriteError(w, http.StatusNotFound, "not_found", "not found")
+			return
+		}
+		apijson.WriteError(w, http.StatusInternalServerError, "internal", "an internal error occurred")
+		return
+	}
+	// Delivery accepted; execution is asynchronous like every trigger.
+	apijson.WriteJSON(w, http.StatusAccepted, map[string]any{"runId": run.ID, "workflow": wf.ID})
+}
 
 // Handlers wires workflow endpoints onto a mux that receives workspace
 // paths. All routes sit behind identity.RequireUser; membership is checked

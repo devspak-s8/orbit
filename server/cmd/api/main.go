@@ -57,7 +57,7 @@ func main() {
 	demoSvc := demo.NewService(pool, eventsSvc, mods)
 	mods.RegisterUninstallHook("orbit.demo", demoSvc.Cleanup)
 	automationSvc := automation.NewService(pool)
-	runner := automation.NewRunner(pool)
+	runner := automation.NewRunner(pool, cfg.SMTP)
 	workSvc := work.NewService(pool, eventsSvc, mods)
 
 	if err := mods.Seed(ctx); err != nil {

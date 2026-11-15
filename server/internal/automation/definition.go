@@ -14,10 +14,14 @@ import (
 
 // Trigger describes what starts a workflow.
 type Trigger struct {
-	// Type is "event" (subscribes to a platform event type) or "manual".
+	// Type is "event" (subscribes to a platform event type), "manual",
+	// "webhook" (inbound POST /hooks/{token}), or "schedule".
 	Type string `json:"type"`
 	// EventType is required for event triggers, e.g. "demo.record.created".
 	EventType string `json:"eventType,omitempty"`
+	// IntervalSec is required for schedule triggers: how often the
+	// workflow fires (60s minimum, 7d maximum).
+	IntervalSec int `json:"intervalSec,omitempty"`
 }
 
 // NodeConfig carries the per-type node configuration.
@@ -29,6 +33,10 @@ type NodeConfig struct {
 	Body    map[string]any    `json:"body,omitempty"`
 	// Log node.
 	Message string `json:"message,omitempty"`
+	// Email node.
+	To      string `json:"to,omitempty"`
+	Subject string `json:"subject,omitempty"`
+	Text    string `json:"text,omitempty"`
 	// Both.
 	Retries   int `json:"retries,omitempty"`
 	TimeoutMs int `json:"timeoutMs,omitempty"`
@@ -59,10 +67,12 @@ const (
 	maxNodes        = 32
 	defaultNodeSecs = 10
 	maxNodeSecs     = 60
+	minScheduleSecs = 60
+	maxScheduleSecs = 7 * 24 * 60 * 60
 )
 
 var (
-	nodeTypes   = map[string]bool{"http": true, "log": true}
+	nodeTypes   = map[string]bool{"http": true, "log": true, "email": true}
 	httpMethods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
 	// placeholderPattern matches {{payload.key}} tokens in URL/body values.
 	placeholderPattern = regexp.MustCompile(`\{\{\s*payload\.([a-zA-Z0-9_]+)\s*\}\}`)
@@ -83,8 +93,16 @@ func (d *Definition) Validate() error {
 		if d.Trigger.EventType != "" {
 			problems = append(problems, "manual trigger must not declare eventType")
 		}
+	case "webhook":
+		if d.Trigger.EventType != "" || d.Trigger.IntervalSec != 0 {
+			problems = append(problems, "webhook trigger takes no additional configuration")
+		}
+	case "schedule":
+		if d.Trigger.IntervalSec < minScheduleSecs || d.Trigger.IntervalSec > maxScheduleSecs {
+			problems = append(problems, fmt.Sprintf("schedule trigger requires intervalSec %d-%d (seconds)", minScheduleSecs, maxScheduleSecs))
+		}
 	default:
-		problems = append(problems, `trigger.type must be "event" or "manual"`)
+		problems = append(problems, `trigger.type must be "event", "manual", "webhook", or "schedule"`)
 	}
 
 	if len(d.Nodes) == 0 {
@@ -122,6 +140,20 @@ func (d *Definition) Validate() error {
 			}
 			if bad := n.Config.TimeoutMs; bad < 0 || bad > maxNodeSecs*1000 {
 				problems = append(problems, fmt.Sprintf("node %q: timeoutMs must be 0-%d", n.ID, maxNodeSecs*1000))
+			}
+		}
+		if n.Type == "email" {
+			// Template tokens substitute at runtime; a literal address is
+			// validated now, a templated one validates on delivery.
+			hasPlaceholder := placeholderPattern.MatchString(n.Config.To)
+			if strings.TrimSpace(n.Config.To) == "" || (!strings.Contains(n.Config.To, "@") && !hasPlaceholder) {
+				problems = append(problems, fmt.Sprintf("node %q: email requires to (comma-separated addresses)", n.ID))
+			}
+			if strings.TrimSpace(n.Config.Subject) == "" {
+				problems = append(problems, fmt.Sprintf("node %q: email requires subject", n.ID))
+			}
+			if n.Config.Retries < 0 || n.Config.Retries > 5 {
+				problems = append(problems, fmt.Sprintf("node %q: retries must be 0-5", n.ID))
 			}
 		}
 	}

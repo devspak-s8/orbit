@@ -13,7 +13,7 @@ ORBIT replaces a stack of disconnected subscriptions (task management, automatio
 - **Work Management** — the first product module: projects, tasks, boards, assignments, due dates, priorities; lifecycle events feed the automation engine
 - **Modules** — manifest-based registry, install → enable → disable → uninstall lifecycle (owner-only), UI registration
 - **Event log** — transactional, workspace-scoped events
-- **Automation engine** — JSON workflow definitions with validation (drafts never execute), event and manual triggers, HTTP/log nodes, per-node retries and timeouts, per-step durable execution history, and restart recovery that resumes interrupted runs
+- **Automation engine** — JSON workflow definitions with validation (drafts never execute), four triggers (**platform events, manual runs, inbound webhooks, schedules**), **HTTP, log, and email** nodes, per-node retries and timeouts, per-step durable execution history, and restart recovery that resumes interrupted runs
 
 ## Run the full stack
 
@@ -61,6 +61,25 @@ Requires the dev database (`docker compose up -d db`). CI runs the same suite ag
 | `ORBIT_HTTP_ADDR` | `:8080` | API listen address |
 | `ORBIT_DATABASE_URL` | `postgres://orbit:orbit@localhost:5434/orbit?sslmode=disable` | PostgreSQL connection string |
 | `ORBIT_CORS_ORIGINS` | `http://localhost:5173` | Allowed browser origins (comma-separated) |
+| `ORBIT_SMTP_HOST` | *(empty)* | Outbound SMTP relay for email nodes — empty disables email with a clear error |
+| `ORBIT_SMTP_PORT` | `587` | SMTP relay port |
+| `ORBIT_SMTP_USER` / `ORBIT_SMTP_PASS` | *(empty)* | SMTP credentials |
+| `ORBIT_SMTP_FROM` | `orbit@localhost` | Envelope sender |
+
+### Webhooks
+
+Any workflow can be triggered from anywhere on the internet: give it the
+`webhook` trigger, validate it, and the workflow page shows a unique URL:
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"name":"Ada","message":"hello"}' \
+  http://your-orbit/hooks/<token>
+```
+
+The JSON body becomes the run's payload — `{{payload.name}}` in any node
+config substitutes from it. The secret is the URL; unknown URLs return
+the same 404 as missing ones. Deliveries are rate-limited and audited.
 
 ## Backups
 

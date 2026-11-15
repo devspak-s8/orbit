@@ -8,12 +8,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/smtp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/orbit-org/orbit/server/internal/config"
 )
 
 // Runner is the workflow execution worker: it relays platform events into
@@ -22,12 +27,14 @@ import (
 type Runner struct {
 	pool   *pgxpool.Pool
 	client *http.Client
+	smtp   config.SMTPConfig
 }
 
-func NewRunner(pool *pgxpool.Pool) *Runner {
+func NewRunner(pool *pgxpool.Pool, smtp config.SMTPConfig) *Runner {
 	return &Runner{
 		pool:   pool,
 		client: &http.Client{}, // per-request timeouts come from node config
+		smtp:   smtp,
 	}
 }
 
@@ -50,6 +57,9 @@ func (r *Runner) Run(ctx context.Context) {
 		case <-ticker.C:
 			if err := r.RelayEvents(ctx); err != nil && ctx.Err() == nil {
 				slog.Error("automation event relay", "error", err)
+			}
+			if err := r.RunDueSchedules(ctx); err != nil && ctx.Err() == nil {
+				slog.Error("automation scheduler", "error", err)
 			}
 			for {
 				ran, err := r.ProcessNext(ctx)
@@ -344,9 +354,51 @@ func (r *Runner) execNode(ctx context.Context, node Node, payload map[string]any
 		return r.execHTTP(ctx, node, payload)
 	case "log":
 		return execLog(node, payload)
+	case "email":
+		return r.execEmail(ctx, node, payload)
 	default:
 		return nil, fmt.Errorf("unknown node type %q", node.Type)
 	}
+}
+
+// execEmail sends one plain-text email through the server's SMTP relay.
+// All fields support {{payload.*}} substitution. An unconfigured relay
+// fails the node with a clear error — never a silent skip.
+func (r *Runner) execEmail(ctx context.Context, node Node, payload map[string]any) (map[string]any, error) {
+	if r.smtp.Host == "" {
+		return nil, fmt.Errorf("email is not configured on this server: set ORBIT_SMTP_HOST (see README)")
+	}
+
+	to := strings.Split(substituteTokens(node.Config.To, payload), ",")
+	recipients := make([]string, 0, len(to))
+	for _, addr := range to {
+		if addr = strings.TrimSpace(addr); addr != "" {
+			recipients = append(recipients, addr)
+		}
+	}
+	if len(recipients) == 0 {
+		return nil, fmt.Errorf("email node has no recipients after substitution")
+	}
+	subject := substituteTokens(node.Config.Subject, payload)
+	text := substituteTokens(node.Config.Text, payload)
+
+	msg := &bytes.Buffer{}
+	fmt.Fprintf(msg, "From: %s\r\n", r.smtp.From)
+	fmt.Fprintf(msg, "To: %s\r\n", strings.Join(recipients, ", "))
+	fmt.Fprintf(msg, "Subject: %s\r\n", subject)
+	fmt.Fprintf(msg, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
+	fmt.Fprintf(msg, "Content-Type: text/plain; charset=utf-8\r\n")
+	fmt.Fprintf(msg, "\r\n%s\r\n", text)
+
+	addr := net.JoinHostPort(r.smtp.Host, strconv.Itoa(r.smtp.Port))
+	var auth smtp.Auth
+	if r.smtp.User != "" {
+		auth = smtp.PlainAuth("", r.smtp.User, r.smtp.Pass, r.smtp.Host)
+	}
+	if err := smtp.SendMail(addr, auth, r.smtp.From, recipients, msg.Bytes()); err != nil {
+		return nil, fmt.Errorf("send mail via %s: %w", addr, err)
+	}
+	return map[string]any{"to": recipients, "subject": subject}, nil
 }
 
 // execHTTP performs the node's HTTP request. {{payload.key}} tokens in the
@@ -479,7 +531,19 @@ func (r *Runner) enqueue(ctx context.Context, wf Workflow, triggerType string, p
 		return Run{}, fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	run, err := r.enqueueTx(ctx, tx, wf, triggerType, payload)
+	if err != nil {
+		return Run{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Run{}, fmt.Errorf("commit: %w", err)
+	}
+	return run, nil
+}
 
+// enqueueTx inserts a run and its pending steps inside the caller's
+// transaction, so trigger state and queued work commit atomically.
+func (r *Runner) enqueueTx(ctx context.Context, tx pgx.Tx, wf Workflow, triggerType string, payload map[string]any) (Run, error) {
 	var run Run
 	if err := tx.QueryRow(ctx,
 		`INSERT INTO workflow_runs (workflow_id, workspace_id, version, trigger_type, trigger_payload)
@@ -497,8 +561,91 @@ func (r *Runner) enqueue(ctx context.Context, wf Workflow, triggerType string, p
 			return Run{}, fmt.Errorf("insert step: %w", err)
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return Run{}, fmt.Errorf("commit: %w", err)
-	}
 	return run, nil
+}
+
+// RunDueSchedules enqueues runs for schedule-triggered workflows whose
+// next_due_at has passed. The cursor advances in the same transaction as
+// the enqueue, so a crash can neither double-fire nor lose the fire.
+func (r *Runner) RunDueSchedules(ctx context.Context) error {
+	for {
+		enqueued, err := r.runOneDueSchedule(ctx)
+		if err != nil {
+			return err
+		}
+		if !enqueued {
+			return nil
+		}
+	}
+}
+
+func (r *Runner) runOneDueSchedule(ctx context.Context) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var wf Workflow
+	var raw []byte
+	err = tx.QueryRow(ctx,
+		`SELECT w.id::text, w.workspace_id::text, w.current_version, v.definition
+		 FROM workflows w
+		 JOIN workflow_versions v ON v.workflow_id = w.id AND v.version = w.current_version
+		 WHERE w.status = 'ready' AND w.next_due_at IS NOT NULL AND w.next_due_at <= now()
+		 ORDER BY w.next_due_at
+		 LIMIT 1
+		 FOR UPDATE OF w SKIP LOCKED`,
+	).Scan(&wf.ID, &wf.WorkspaceID, &wf.CurrentVersion, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("claim due workflow: %w", err)
+	}
+
+	var def Definition
+	if err := json.Unmarshal(raw, &def); err != nil {
+		// Unreadable definition: clear the cursor so it never fires again
+		// silently. Loudly logged; the workflow shows as ready but never
+		// schedules — visible in history by the absence of runs.
+		if _, err := tx.Exec(ctx, `UPDATE workflows SET next_due_at = NULL WHERE id = $1`, wf.ID); err != nil {
+			return false, fmt.Errorf("clear bad schedule: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("commit: %w", err)
+		}
+		slog.Error("schedule workflow has unreadable definition; cursor cleared", "workflow", wf.ID)
+		return true, nil
+	}
+
+	if def.Trigger.Type != "schedule" || def.Trigger.IntervalSec < minScheduleSecs {
+		// The trigger changed shape without revalidation: clear the cursor.
+		if _, err := tx.Exec(ctx, `UPDATE workflows SET next_due_at = NULL WHERE id = $1`, wf.ID); err != nil {
+			return false, fmt.Errorf("clear mismatched schedule: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("commit: %w", err)
+		}
+		slog.Error("schedule cursor on non-schedule workflow; cleared", "workflow", wf.ID)
+		return true, nil
+	}
+
+	// Advance the cursor and enqueue the run in one transaction.
+	if _, err := tx.Exec(ctx,
+		`UPDATE workflows SET next_due_at = now() + make_interval(secs => $2) WHERE id = $1`,
+		wf.ID, def.Trigger.IntervalSec,
+	); err != nil {
+		return false, fmt.Errorf("advance schedule: %w", err)
+	}
+
+	wf.Definition = &def
+	if _, err := r.enqueueTx(ctx, tx, wf, "schedule", map[string]any{"scheduled": true}); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit: %w", err)
+	}
+	slog.Info("scheduled workflow fired", "workflow", wf.ID)
+	return true, nil
 }
