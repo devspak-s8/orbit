@@ -13,6 +13,7 @@ import (
 	"github.com/orbit-org/orbit/server/internal/events"
 	"github.com/orbit-org/orbit/server/internal/identity"
 	"github.com/orbit-org/orbit/server/internal/modules"
+	"github.com/orbit-org/orbit/server/internal/notifications"
 	"github.com/orbit-org/orbit/server/internal/workspaces"
 )
 
@@ -45,6 +46,7 @@ func setup(t *testing.T) *env {
 
 	ident := identity.NewService(pool, 24*time.Hour)
 	wsSvc := workspaces.NewService(pool)
+	wsSvc.UseNotifications(notifications.NewService(pool))
 	catalog, err := modules.LoadCatalog()
 	if err != nil {
 		pool.Close()
@@ -52,7 +54,7 @@ func setup(t *testing.T) *env {
 	}
 	mods := modules.NewService(pool, catalog)
 	eventsSvc := events.NewService(pool)
-	workSvc := NewService(pool, eventsSvc, mods)
+	workSvc := NewService(pool, eventsSvc, mods, notifications.NewService(pool))
 	autoSvc := automation.NewService(pool)
 	runner := automation.NewRunner(pool, config.SMTPConfig{})
 

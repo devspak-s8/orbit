@@ -17,6 +17,55 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("POST /v1/workspaces", s.handleCreate)
 	api.HandleFunc("GET /v1/workspaces/{id}", s.handleGet)
 	api.HandleFunc("GET /v1/workspaces/{id}/members", s.handleListMembers)
+	api.HandleFunc("POST /v1/workspaces/{id}/invites", s.handleCreateInvite)
+}
+
+// HandlersUser wires user-scoped routes (not under /v1/workspaces). Callers
+// mount these behind identity.RequireUser on the top-level API mux.
+func (s *Service) HandlersUser(api *http.ServeMux) {
+	api.HandleFunc("POST /v1/invites/{code}/redeem", s.handleRedeemInvite)
+}
+
+func (s *Service) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	invite, err := s.CreateInvite(r.Context(), user.ID, r.PathValue("id"))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			apijson.WriteError(w, http.StatusForbidden, "forbidden", "only owners can create invites")
+		case errors.Is(err, ErrNotFound):
+			apijson.WriteError(w, http.StatusNotFound, "not_found", "workspace not found")
+		default:
+			apijson.WriteError(w, http.StatusInternalServerError, "internal", "an internal error occurred")
+		}
+		return
+	}
+	apijson.WriteJSON(w, http.StatusCreated, map[string]any{"invite": invite})
+}
+
+func (s *Service) handleRedeemInvite(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	ws, err := s.RedeemInvite(r.Context(), user.ID, r.PathValue("code"))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInviteInvalid):
+			apijson.WriteError(w, http.StatusNotFound, "not_found", "invite is invalid or has expired")
+		case errors.Is(err, ErrAlreadyMember):
+			apijson.WriteError(w, http.StatusConflict, "already_member", err.Error())
+		default:
+			apijson.WriteError(w, http.StatusInternalServerError, "internal", "an internal error occurred")
+		}
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"workspace": ws})
 }
 
 func (s *Service) handleList(w http.ResponseWriter, r *http.Request) {

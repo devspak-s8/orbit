@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/orbit-org/orbit/server/internal/notifications"
 )
 
 var (
@@ -21,6 +23,8 @@ var (
 	ErrNotFound = errors.New("workspace not found")
 	// ErrInvalidName is returned for empty or oversized names.
 	ErrInvalidName = errors.New("workspace name must be 1-80 characters")
+	// ErrForbidden is returned when the caller lacks the required role.
+	ErrForbidden = errors.New("only workspace owners can do this")
 )
 
 // Workspace is the public representation of a workspace the caller belongs to.
@@ -35,10 +39,18 @@ type Workspace struct {
 // Service manages workspaces and memberships.
 type Service struct {
 	pool *pgxpool.Pool
+	// notif is optional (injected via UseNotifications): core wiring adds
+	// it so joins notify owners; test setups may skip it.
+	notif *notifications.Service
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
+}
+
+// UseNotifications injects the notification service for join notifications.
+func (s *Service) UseNotifications(n *notifications.Service) {
+	s.notif = n
 }
 
 var slugInvalid = regexp.MustCompile(`[^a-z0-9-]+`)

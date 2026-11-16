@@ -46,16 +46,26 @@ function TaskCard({
   task,
   onOpen,
   onMove,
+  onDragStart,
 }: {
   task: Task
   onOpen: () => void
   onMove: (status: TaskStatus) => void
+  onDragStart: () => void
 }) {
   const moves: { to: TaskStatus; label: string }[] = COLUMNS.filter((c) => c.status !== task.status).map(
     (c) => ({ to: c.status, label: c.label }),
   )
   return (
-    <li className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-3">
+    <li
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', task.id)
+        e.dataTransfer.effectAllowed = 'move'
+        onDragStart()
+      }}
+      className="cursor-grab rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 active:cursor-grabbing"
+    >
       <button onClick={onOpen} className="block w-full text-left">
         <div className="text-sm font-medium">{task.title}</div>
         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
@@ -101,6 +111,7 @@ export default function ProjectBoard() {
   const [selected, setSelected] = useState<Task | null>(null)
   const [quickAdd, setQuickAdd] = useState('')
   const [busy, setBusy] = useState(false)
+  const [dragOver, setDragOver] = useState<TaskStatus | null>(null)
 
   function showError(err: unknown) {
     setError(err instanceof ApiError ? err.message : 'Something went wrong')
@@ -201,14 +212,39 @@ export default function ProjectBoard() {
           {COLUMNS.map((col) => {
             const columnTasks = tasks.filter((t) => t.status === col.status)
             return (
-              <section key={col.status} className="flex-1 rounded-lg bg-neutral-900/30 p-3">
+              <section
+                key={col.status}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  setDragOver(col.status)
+                }}
+                onDragLeave={() => setDragOver(null)}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOver(null)
+                  const id = e.dataTransfer.getData('text/plain')
+                  const task = tasks.find((t) => t.id === id)
+                  if (task && task.status !== col.status) void move(task, col.status)
+                }}
+                className={
+                  'flex-1 rounded-lg p-3 transition-colors ' +
+                  (dragOver === col.status ? 'bg-neutral-800/40 ring-1 ring-emerald-700' : 'bg-neutral-900/30')
+                }
+              >
                 <h2 className="mb-3 flex items-center justify-between text-sm font-medium">
                   {col.label}
                   <span className="text-xs font-normal text-neutral-500">{columnTasks.length}</span>
                 </h2>
                 <ul className="space-y-2">
                   {columnTasks.map((t) => (
-                    <TaskCard key={t.id} task={t} onOpen={() => setSelected(t)} onMove={(s) => move(t, s)} />
+                    <TaskCard
+                      key={t.id}
+                      task={t}
+                      onOpen={() => setSelected(t)}
+                      onMove={(s) => move(t, s)}
+                      onDragStart={() => setSelected(null)}
+                    />
                   ))}
                 </ul>
                 {col.status === 'todo' && (

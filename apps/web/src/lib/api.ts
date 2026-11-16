@@ -384,3 +384,39 @@ export function deleteTask(workspaceId: string, taskId: string): Promise<void> {
     method: 'DELETE',
   }).then(() => undefined)
 }
+
+export interface Invite {
+  code: string
+  workspaceId: string
+  expiresAt: string
+  createdAt: string
+}
+
+export function createInvite(workspaceId: string): Promise<Invite> {
+  return api<{ invite: Invite }>(`/v1/workspaces/${workspaceId}/invites`, {
+    method: 'POST',
+  }).then((r) => r.invite)
+}
+
+export function redeemInvite(code: string): Promise<Workspace> {
+  return api<{ workspace: Workspace }>(`/v1/invites/${code}/redeem`, {
+    method: 'POST',
+  }).then((r) => r.workspace)
+}
+
+export interface AppNotification {
+  id: string
+  type: string
+  workspaceId: string
+  payload: Record<string, unknown>
+  readAt: string | null
+  createdAt: string
+}
+
+export function listNotifications(): Promise<{ notifications: AppNotification[]; unread: number }> {
+  return api('/v1/notifications')
+}
+
+export function markAllNotificationsRead(): Promise<void> {
+  return api<{ status: string }>('/v1/notifications/read-all', { method: 'POST' }).then(() => undefined)
+}

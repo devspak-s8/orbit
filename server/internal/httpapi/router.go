@@ -14,19 +14,21 @@ import (
 	"github.com/orbit-org/orbit/server/internal/events"
 	"github.com/orbit-org/orbit/server/internal/identity"
 	"github.com/orbit-org/orbit/server/internal/modules"
+	"github.com/orbit-org/orbit/server/internal/notifications"
 	"github.com/orbit-org/orbit/server/internal/work"
 	"github.com/orbit-org/orbit/server/internal/workspaces"
 )
 
 // Services bundles the domain services the router wires into HTTP routes.
 type Services struct {
-	Identity   *identity.Service
-	Workspaces *workspaces.Service
-	Modules    *modules.Service
-	Demo       *demo.Service
-	Events     *events.Service
-	Automation *automation.Service
-	Work       *work.Service
+	Identity      *identity.Service
+	Workspaces    *workspaces.Service
+	Modules       *modules.Service
+	Demo          *demo.Service
+	Events        *events.Service
+	Automation    *automation.Service
+	Work          *work.Service
+	Notifications *notifications.Service
 }
 
 // NewRouter builds the full API handler with standard middleware applied.
@@ -50,6 +52,14 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string,
 
 	// Identity endpoints (some public, some session-guarded internally).
 	svcs.Identity.Handlers(api)
+
+	// User-scoped routes: notifications and invite redemption.
+	userAPI := http.NewServeMux()
+	svcs.Notifications.Handlers(userAPI)
+	svcs.Workspaces.HandlersUser(userAPI)
+	api.Handle("/v1/notifications", svcs.Identity.RequireUser(userAPI))
+	api.Handle("/v1/notifications/", svcs.Identity.RequireUser(userAPI))
+	api.Handle("/v1/invites/", svcs.Identity.RequireUser(userAPI))
 
 	// Everything under /v1/workspaces requires an authenticated session.
 	// Deeper authorization (membership, owner role, module enabled) is

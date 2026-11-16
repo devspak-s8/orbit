@@ -18,6 +18,7 @@ import (
 	"github.com/orbit-org/orbit/server/internal/httpapi"
 	"github.com/orbit-org/orbit/server/internal/identity"
 	"github.com/orbit-org/orbit/server/internal/modules"
+	"github.com/orbit-org/orbit/server/internal/notifications"
 	"github.com/orbit-org/orbit/server/internal/work"
 	"github.com/orbit-org/orbit/server/internal/workspaces"
 )
@@ -58,7 +59,9 @@ func main() {
 	mods.RegisterUninstallHook("orbit.demo", demoSvc.Cleanup)
 	automationSvc := automation.NewService(pool)
 	runner := automation.NewRunner(pool, cfg.SMTP)
-	workSvc := work.NewService(pool, eventsSvc, mods)
+	notifSvc := notifications.NewService(pool)
+	ws.UseNotifications(notifSvc)
+	workSvc := work.NewService(pool, eventsSvc, mods, notifSvc)
 
 	if err := mods.Seed(ctx); err != nil {
 		logger.Error("seeding module registry", "error", err)
@@ -71,13 +74,14 @@ func main() {
 	go runner.Run(ctx)
 
 	svcs := httpapi.Services{
-		Identity:   ident,
-		Workspaces: ws,
-		Modules:    mods,
-		Demo:       demoSvc,
-		Events:     eventsSvc,
-		Automation: automationSvc,
-		Work:       workSvc,
+		Identity:      ident,
+		Workspaces:    ws,
+		Modules:       mods,
+		Demo:          demoSvc,
+		Events:        eventsSvc,
+		Automation:    automationSvc,
+		Work:          workSvc,
+		Notifications: notifSvc,
 	}
 
 	srv := &http.Server{

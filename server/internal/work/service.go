@@ -15,6 +15,7 @@ import (
 
 	"github.com/orbit-org/orbit/server/internal/events"
 	"github.com/orbit-org/orbit/server/internal/modules"
+	"github.com/orbit-org/orbit/server/internal/notifications"
 )
 
 var (
@@ -65,6 +66,7 @@ type Task struct {
 	DueDate      *string    `json:"dueDate"` // YYYY-MM-DD or null
 	Position     int        `json:"position"`
 	CompletedAt  *time.Time `json:"completedAt"`
+	CreatedBy    string     `json:"createdBy"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
 }
@@ -83,10 +85,11 @@ type Service struct {
 	pool   *pgxpool.Pool
 	events *events.Service
 	mods   *modules.Service
+	notif  *notifications.Service
 }
 
-func NewService(pool *pgxpool.Pool, events *events.Service, mods *modules.Service) *Service {
-	return &Service{pool: pool, events: events, mods: mods}
+func NewService(pool *pgxpool.Pool, events *events.Service, mods *modules.Service, notif *notifications.Service) *Service {
+	return &Service{pool: pool, events: events, mods: mods, notif: notif}
 }
 
 // Enabled reports whether the module is installed and enabled.
@@ -296,12 +299,19 @@ func (s *Service) CreateTask(ctx context.Context, userID, workspaceID, projectID
 	}); err != nil {
 		return Task{}, err
 	}
-	if t.AssigneeID != "" {
+	if assigneeID != "" {
 		if err := s.events.PublishTx(ctx, tx, events.Event{
 			Type: "task.assigned", WorkspaceID: workspaceID, ActorUserID: userID,
-			Payload: map[string]any{"taskId": t.ID, "assigneeId": t.AssigneeID, "title": t.Title},
+			Payload: map[string]any{"taskId": t.ID, "assigneeId": assigneeID, "title": t.Title},
 		}); err != nil {
 			return Task{}, err
+		}
+		if assigneeID != userID {
+			if err := s.notif.InsertTx(ctx, tx, assigneeID, workspaceID, "task.assigned", map[string]any{
+				"taskId": t.ID, "title": t.Title, "actorUserId": userID,
+			}); err != nil {
+				return Task{}, err
+			}
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -328,7 +338,7 @@ func (s *Service) ListTasks(ctx context.Context, userID, workspaceID, projectID,
 	rows, err := s.pool.Query(ctx,
 		`SELECT t.id::text, t.project_id::text, t.workspace_id::text, t.title, t.description,
 		        t.status, t.priority, COALESCE(t.assignee_id::text, ''), COALESCE(u.display_name, ''),
-		        t.due_date::text, t.position, t.completed_at, t.created_at, t.updated_at
+		        t.due_date::text, t.position, t.completed_at, COALESCE(t.created_by::text, ''), t.created_at, t.updated_at
 		 FROM module_work.tasks t
 		 LEFT JOIN users u ON u.id = t.assignee_id
 		 WHERE t.project_id = $1 AND ($2 = '' OR t.status = $2)
@@ -362,7 +372,7 @@ func (s *Service) loadTask(ctx context.Context, workspaceID, taskID string) (Tas
 	row := s.pool.QueryRow(ctx,
 		`SELECT t.id::text, t.project_id::text, t.workspace_id::text, t.title, t.description,
 		        t.status, t.priority, COALESCE(t.assignee_id::text, ''), COALESCE(u.display_name, ''),
-		        t.due_date::text, t.position, t.completed_at, t.created_at, t.updated_at
+		        t.due_date::text, t.position, t.completed_at, COALESCE(t.created_by::text, ''), t.created_at, t.updated_at
 		 FROM module_work.tasks t
 		 LEFT JOIN users u ON u.id = t.assignee_id
 		 WHERE t.id = $1 AND t.workspace_id = $2`,
@@ -445,6 +455,13 @@ func (s *Service) UpdateTask(ctx context.Context, userID, workspaceID, taskID st
 		}); err != nil {
 			return Task{}, err
 		}
+		if current.AssigneeID != userID {
+			if err := s.notif.InsertTx(ctx, tx, current.AssigneeID, workspaceID, "task.assigned", map[string]any{
+				"taskId": taskID, "title": current.Title, "actorUserId": userID,
+			}); err != nil {
+				return Task{}, err
+			}
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Task{}, fmt.Errorf("commit: %w", err)
@@ -506,6 +523,14 @@ func (s *Service) SetTaskStatus(ctx context.Context, userID, workspaceID, taskID
 		}); err != nil {
 			return Task{}, err
 		}
+		// The task's creator is told when their task completes.
+		if evtType == "task.completed" && current.CreatedBy != "" && current.CreatedBy != userID {
+			if err := s.notif.InsertTx(ctx, tx, current.CreatedBy, workspaceID, "task.completed", map[string]any{
+				"taskId": taskID, "title": current.Title, "actorUserId": userID,
+			}); err != nil {
+				return Task{}, err
+			}
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Task{}, fmt.Errorf("commit: %w", err)
@@ -539,7 +564,7 @@ func scanTask(row rowScanner) (Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.WorkspaceID, &t.Title, &t.Description,
 		&t.Status, &t.Priority, &t.AssigneeID, &t.AssigneeName,
-		&t.DueDate, &t.Position, &t.CompletedAt, &t.CreatedAt, &t.UpdatedAt)
+		&t.DueDate, &t.Position, &t.CompletedAt, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
 	return t, err
 }
 

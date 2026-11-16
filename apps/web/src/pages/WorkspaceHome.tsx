@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ApiError,
+  createInvite,
   disableModule,
   enableModule,
   getWorkspace,
   installModule,
+  listMembers,
   listWorkspaceModules,
   uninstallModule,
+  type Member,
   type Workspace,
   type WorkspaceModule,
 } from '../lib/api'
@@ -110,6 +113,83 @@ function ModuleCard({
   )
 }
 
+function MembersSection({ workspaceId, isOwner }: { workspaceId: string; isOwner: boolean }) {
+  const [members, setMembers] = useState<Member[] | null>(null)
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    listMembers(workspaceId).then(setMembers).catch(() => {})
+  }, [workspaceId])
+
+  async function handleInvite() {
+    setError(null)
+    try {
+      const invite = await createInvite(workspaceId)
+      setInviteUrl(`${window.location.origin}/join/${invite.code}`)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not create invite')
+    }
+  }
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-lg font-medium">Members</h2>
+        {isOwner && (
+          <button
+            onClick={handleInvite}
+            className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:border-neutral-500"
+          >
+            Invite people
+          </button>
+        )}
+      </div>
+      {error && <p className="mb-2 text-sm text-red-400">{error}</p>}
+      {inviteUrl && (
+        <div className="mb-3 flex items-center gap-2 rounded border border-emerald-800/60 bg-neutral-900/60 p-2">
+          <code className="flex-1 overflow-x-auto font-mono text-xs text-emerald-400">{inviteUrl}</code>
+          <button
+            onClick={() => {
+              void navigator.clipboard.writeText(inviteUrl).then(() => {
+                setCopied(true)
+                setTimeout(() => setCopied(false), 1500)
+              })
+            }}
+            className="rounded border border-neutral-700 px-2 py-1 text-xs hover:border-neutral-500"
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+      )}
+      {members === null ? (
+        <p className="text-sm text-neutral-500">Loading members…</p>
+      ) : (
+        <ul className="max-w-3xl divide-y divide-neutral-800 rounded-lg border border-neutral-800">
+          {members.map((m) => (
+            <li key={m.userId} className="flex items-center justify-between px-4 py-2 text-sm">
+              <div>
+                <div>{m.displayName || m.email}</div>
+                <div className="text-xs text-neutral-500">{m.email}</div>
+              </div>
+              <span
+                className={
+                  m.role === 'owner'
+                    ? 'rounded-full border border-emerald-700 px-2 py-0.5 text-xs text-emerald-400'
+                    : 'rounded-full border border-neutral-700 px-2 py-0.5 text-xs text-neutral-400'
+                }
+              >
+                {m.role}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function WorkspaceHome() {
   const { id } = useParams<{ id: string }>()
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
@@ -182,6 +262,8 @@ export default function WorkspaceHome() {
           </div>
         )}
       </div>
+
+      <MembersSection workspaceId={workspace.id} isOwner={workspace.role === 'owner'} />
     </div>
   )
 }
