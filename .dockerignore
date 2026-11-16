@@ -1,0 +1,12 @@
+# Keep Docker build contexts lean: dependencies and build outputs are
+# recreated inside the images.
+**/node_modules
+**/dist
+**/bin
+.git
+.github
+backups
+docs
+*.md
+!README.md
+PLAN.md

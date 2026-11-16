@@ -5,6 +5,9 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Join from './pages/Join'
 import Landing from './pages/Landing'
+import Features from './pages/Features'
+import Deploy from './pages/Deploy'
+import About from './pages/About'
 import Workspaces from './pages/Workspaces'
 import WorkspaceHome from './pages/WorkspaceHome'
 import ModuleDemo from './pages/ModuleDemo'
@@ -210,6 +213,9 @@ export default function App() {
     return (
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/features" element={<Features />} />
+        <Route path="/deploy" element={<Deploy />} />
+        <Route path="/about" element={<About />} />
         <Route path="/login" element={<Login onSuccess={setMe} />} />
         <Route path="/signup" element={<Signup onSuccess={setMe} />} />
         <Route path="/join/:code" element={<Join />} />
