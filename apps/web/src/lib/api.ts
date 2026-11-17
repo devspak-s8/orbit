@@ -420,3 +420,112 @@ export function listNotifications(): Promise<{ notifications: AppNotification[];
 export function markAllNotificationsRead(): Promise<void> {
   return api<{ status: string }>('/v1/notifications/read-all', { method: 'POST' }).then(() => undefined)
 }
+
+export interface DataColumn {
+  id: string
+  name: string
+  type: 'text' | 'number' | 'date' | 'select' | 'checkbox'
+  options?: string[]
+}
+
+export interface DataTable {
+  id: string
+  workspaceId: string
+  name: string
+  columns?: DataColumn[]
+  formToken?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DataRecord {
+  id: string
+  tableId: string
+  values: Record<string, unknown>
+  source: 'ui' | 'form' | 'csv'
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+export function listTables(workspaceId: string): Promise<DataTable[]> {
+  return api<{ tables: DataTable[] }>(`/v1/workspaces/${workspaceId}/tables`).then((r) => r.tables)
+}
+
+export function createTable(
+  workspaceId: string,
+  name: string,
+  columns: Array<{ name: string; type: string; options?: string[] }>,
+): Promise<DataTable> {
+  return api<{ table: DataTable }>(`/v1/workspaces/${workspaceId}/tables`, {
+    method: 'POST',
+    body: JSON.stringify({ name, columns }),
+  }).then((r) => r.table)
+}
+
+export function getTable(workspaceId: string, tableId: string): Promise<DataTable> {
+  return api<{ table: DataTable }>(`/v1/workspaces/${workspaceId}/tables/${tableId}`).then((r) => r.table)
+}
+
+export function addColumn(
+  workspaceId: string,
+  tableId: string,
+  column: { name: string; type: string; options?: string[] },
+): Promise<DataColumn> {
+  return api<{ column: DataColumn }>(`/v1/workspaces/${workspaceId}/tables/${tableId}/columns`, {
+    method: 'POST',
+    body: JSON.stringify(column),
+  }).then((r) => r.column)
+}
+
+export function listRecords(workspaceId: string, tableId: string): Promise<DataRecord[]> {
+  return api<{ records: DataRecord[] }>(`/v1/workspaces/${workspaceId}/tables/${tableId}/records`).then(
+    (r) => r.records,
+  )
+}
+
+export function createRecord(
+  workspaceId: string,
+  tableId: string,
+  values: Record<string, unknown>,
+): Promise<DataRecord> {
+  return api<{ record: DataRecord }>(`/v1/workspaces/${workspaceId}/tables/${tableId}/records`, {
+    method: 'POST',
+    body: JSON.stringify({ values }),
+  }).then((r) => r.record)
+}
+
+export function updateRecord(
+  workspaceId: string,
+  recordId: string,
+  values: Record<string, unknown>,
+): Promise<DataRecord> {
+  return api<{ record: DataRecord }>(`/v1/workspaces/${workspaceId}/records/${recordId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ values }),
+  }).then((r) => r.record)
+}
+
+export function deleteRecord(workspaceId: string, recordId: string): Promise<void> {
+  return api(`/v1/workspaces/${workspaceId}/records/${recordId}`, { method: 'DELETE' }).then(() => undefined)
+}
+
+export function importCSV(workspaceId: string, tableId: string, csv: string): Promise<number> {
+  return api<{ imported: number }>(`/v1/workspaces/${workspaceId}/tables/${tableId}/import`, {
+    method: 'POST',
+    body: JSON.stringify({ csv }),
+  }).then((r) => r.imported)
+}
+
+export function enableForm(workspaceId: string, tableId: string): Promise<DataTable> {
+  return api<{ table: DataTable }>(`/v1/workspaces/${workspaceId}/tables/${tableId}/form`, {
+    method: 'POST',
+  }).then((r) => r.table)
+}
+
+export function submitPublicForm(token: string, values: Record<string, unknown>): Promise<DataRecord> {
+  return api<{ record: DataRecord }>(`/forms/${token}`, {
+    method: 'POST',
+    body: JSON.stringify(values),
+  }).then((r) => r.record)
+}

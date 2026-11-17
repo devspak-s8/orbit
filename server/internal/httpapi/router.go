@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/orbit-org/orbit/server/internal/automation"
+	"github.com/orbit-org/orbit/server/internal/data"
 	"github.com/orbit-org/orbit/server/internal/demo"
 	"github.com/orbit-org/orbit/server/internal/events"
 	"github.com/orbit-org/orbit/server/internal/identity"
@@ -28,6 +29,7 @@ type Services struct {
 	Events        *events.Service
 	Automation    *automation.Service
 	Work          *work.Service
+	Data          *data.Service
 	Notifications *notifications.Service
 }
 
@@ -71,6 +73,7 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string,
 	svcs.Events.Handlers(wsAPI)
 	svcs.Automation.Handlers(wsAPI)
 	svcs.Work.Handlers(wsAPI)
+	svcs.Data.Handlers(wsAPI)
 	api.Handle("/v1/workspaces", svcs.Identity.RequireUser(wsAPI))
 	api.Handle("/v1/workspaces/", svcs.Identity.RequireUser(wsAPI))
 
@@ -79,6 +82,9 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string,
 	// Webhook deliveries are top-level and unauthenticated: the secret is
 	// the token in the path. Rate-limited and audited in the handler.
 	svcs.Automation.HookHandlers(mux)
+
+	// Public form submissions use the same pattern (ADR-0005 semantics).
+	svcs.Data.FormHandlers(mux)
 
 	var h http.Handler = mux
 	h = withCORS(allowedOrigins, h)

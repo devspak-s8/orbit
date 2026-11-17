@@ -15,6 +15,8 @@ import Workflows from './pages/Workflows'
 import WorkflowDetail from './pages/WorkflowDetail'
 import WorkModule from './pages/WorkModule'
 import ProjectBoard from './pages/ProjectBoard'
+import DataModule from './pages/DataModule'
+import PublicForm from './pages/PublicForm'
 
 function Home({ user }: { user: User }) {
   return (
@@ -171,6 +173,8 @@ function ModuleRoute() {
   switch (moduleId) {
     case 'orbit.work':
       return <WorkModule />
+    case 'orbit.data':
+      return <DataModule />
     case 'orbit.demo':
       return <ModuleDemo />
     default:
@@ -235,6 +239,9 @@ export default function App() {
         <Route path="/workspaces/:id/modules/:moduleId" element={<ModuleRoute />} />
         <Route path="/workspaces/:id/work" element={<WorkModule />} />
         <Route path="/workspaces/:id/work/:pid" element={<ProjectBoard />} />
+        <Route path="/workspaces/:id/data" element={<DataModule />} />
+        <Route path="/workspaces/:id/data/:tid" element={<DataModule />} />
+        <Route path="/forms/:token" element={<PublicForm />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Shell>

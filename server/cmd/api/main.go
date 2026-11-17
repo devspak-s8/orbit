@@ -12,6 +12,7 @@ import (
 
 	"github.com/orbit-org/orbit/server/internal/automation"
 	"github.com/orbit-org/orbit/server/internal/config"
+	"github.com/orbit-org/orbit/server/internal/data"
 	"github.com/orbit-org/orbit/server/internal/db"
 	"github.com/orbit-org/orbit/server/internal/demo"
 	"github.com/orbit-org/orbit/server/internal/events"
@@ -62,6 +63,9 @@ func main() {
 	notifSvc := notifications.NewService(pool)
 	ws.UseNotifications(notifSvc)
 	workSvc := work.NewService(pool, eventsSvc, mods, notifSvc)
+	dataSvc := data.NewService(pool, eventsSvc, mods)
+	mods.RegisterUninstallHook(work.ModuleID, workSvc.Cleanup)
+	mods.RegisterUninstallHook(data.ModuleID, dataSvc.Cleanup)
 
 	if err := mods.Seed(ctx); err != nil {
 		logger.Error("seeding module registry", "error", err)
@@ -81,6 +85,7 @@ func main() {
 		Events:        eventsSvc,
 		Automation:    automationSvc,
 		Work:          workSvc,
+		Data:          dataSvc,
 		Notifications: notifSvc,
 	}
 
