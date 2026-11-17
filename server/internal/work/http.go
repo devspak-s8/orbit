@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/orbit-org/orbit/server/internal/apijson"
 	"github.com/orbit-org/orbit/server/internal/identity"
@@ -18,9 +19,14 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("GET /v1/workspaces/{id}/projects/{pid}", s.handleGetProject)
 	api.HandleFunc("GET /v1/workspaces/{id}/projects/{pid}/tasks", s.handleListTasks)
 	api.HandleFunc("POST /v1/workspaces/{id}/projects/{pid}/tasks", s.handleCreateTask)
+	api.HandleFunc("GET /v1/workspaces/{id}/projects/{pid}/labels", s.handleListLabels)
+	api.HandleFunc("POST /v1/workspaces/{id}/projects/{pid}/labels", s.handleCreateLabel)
 	api.HandleFunc("GET /v1/workspaces/{id}/tasks/{tid}", s.handleGetTask)
 	api.HandleFunc("PATCH /v1/workspaces/{id}/tasks/{tid}", s.handleUpdateTask)
 	api.HandleFunc("POST /v1/workspaces/{id}/tasks/{tid}/status", s.handleSetStatus)
+	api.HandleFunc("PUT /v1/workspaces/{id}/tasks/{tid}/labels", s.handleSetTaskLabels)
+	api.HandleFunc("GET /v1/workspaces/{id}/tasks/{tid}/comments", s.handleListComments)
+	api.HandleFunc("POST /v1/workspaces/{id}/tasks/{tid}/comments", s.handleAddComment)
 	api.HandleFunc("DELETE /v1/workspaces/{id}/tasks/{tid}", s.handleDeleteTask)
 }
 
@@ -191,6 +197,107 @@ func (s *Service) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apijson.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (s *Service) handleListLabels(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	items, err := s.ListLabels(r.Context(), userID, wsID, r.PathValue("pid"))
+	if err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	if items == nil {
+		items = []Label{}
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"labels": items})
+}
+
+func (s *Service) handleCreateLabel(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	l, err := s.CreateLabel(r.Context(), userID, wsID, r.PathValue("pid"), req.Name, req.Color)
+	if err != nil {
+		apijson.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	apijson.WriteJSON(w, http.StatusCreated, map[string]any{"label": l})
+}
+
+func (s *Service) handleSetTaskLabels(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		LabelIDs []string `json:"labelIds"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.LabelIDs == nil {
+		req.LabelIDs = []string{}
+	}
+	if err := s.SetTaskLabels(r.Context(), userID, wsID, r.PathValue("tid"), req.LabelIDs); err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	t, err := s.GetTask(r.Context(), userID, wsID, r.PathValue("tid"))
+	if err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"task": t})
+}
+
+func (s *Service) handleListComments(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	items, err := s.ListComments(r.Context(), userID, wsID, r.PathValue("tid"))
+	if err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	if items == nil {
+		items = []Comment{}
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"comments": items})
+}
+
+func (s *Service) handleAddComment(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Body string `json:"body"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	c, err := s.AddComment(r.Context(), userID, wsID, r.PathValue("tid"), req.Body)
+	if err != nil {
+		if err.Error() == "comment must be 1-4000 characters" || strings.Contains(err.Error(), "label") {
+			apijson.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		writeWorkError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusCreated, map[string]any{"comment": c})
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {

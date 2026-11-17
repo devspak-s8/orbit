@@ -1,16 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ApiError,
   createTask,
   deleteTask,
   getProject,
   listMembers,
+  listLabels,
   setTaskStatus,
   updateTask,
   type Member,
   type Project,
   type Task,
+  type TaskLabel,
   type TaskStatus,
 } from '../lib/api'
 
@@ -30,6 +32,16 @@ const PRIORITY_COLORS: Record<string, string> = {
 function isOverdue(t: Task): boolean {
   if (!t.dueDate || t.status === 'done') return false
   return t.dueDate < new Date().toISOString().slice(0, 10)
+}
+
+const LABEL_STYLES: Record<string, string> = {
+  emerald: 'bg-emerald-900/40 text-emerald-300 border-emerald-800/60',
+  sky: 'bg-sky-900/40 text-sky-300 border-sky-800/60',
+  amber: 'bg-amber-900/40 text-amber-300 border-amber-800/60',
+  rose: 'bg-rose-900/40 text-rose-300 border-rose-800/60',
+  violet: 'bg-violet-900/40 text-violet-300 border-violet-800/60',
+  lime: 'bg-lime-900/40 text-lime-300 border-lime-800/60',
+  neutral: 'bg-neutral-800 text-neutral-300 border-neutral-700',
 }
 
 function initials(name: string): string {
@@ -68,6 +80,20 @@ function TaskCard({
     >
       <button onClick={onOpen} className="block w-full text-left">
         <div className="text-sm font-medium">{task.title}</div>
+        {task.labels.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {task.labels.map((l) => (
+              <span
+                key={l.id}
+                className={
+                  'rounded-full border px-1.5 py-px text-[10px] ' + (LABEL_STYLES[l.color] ?? LABEL_STYLES.neutral)
+                }
+              >
+                {l.name}
+              </span>
+            ))}
+          </div>
+        )}
         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
           {task.priority !== 'medium' && (
             <span className={PRIORITY_COLORS[task.priority]}>{task.priority}</span>
@@ -104,9 +130,15 @@ function TaskCard({
 
 export default function ProjectBoard() {
   const { id, pid } = useParams<{ id: string; pid: string }>()
+  const navigate = useNavigate()
   const [project, setProject] = useState<Project | null>(null)
   const [tasks, setTasks] = useState<Task[] | null>(null)
   const [members, setMembers] = useState<Member[]>([])
+  const [labels, setLabels] = useState<TaskLabel[]>([])
+  const [filterAssignee, setFilterAssignee] = useState('')
+  const [filterLabel, setFilterLabel] = useState('')
+  const [filterPriority, setFilterPriority] = useState('')
+  const [overdueOnly, setOverdueOnly] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Task | null>(null)
   const [quickAdd, setQuickAdd] = useState('')
@@ -126,6 +158,7 @@ export default function ProjectBoard() {
       })
       .catch(showError)
     listMembers(id).then(setMembers).catch(() => {})
+    listLabels(id, pid).then(setLabels).catch(() => {})
   }
 
   useEffect(load, [id, pid])
@@ -197,6 +230,14 @@ export default function ProjectBoard() {
     return <p className="text-sm text-neutral-500">Loading project…</p>
   }
 
+  // Client-side filters (the board loads whole projects at alpha scale).
+  const visible = (t: Task) =>
+    (!filterAssignee || t.assigneeId === filterAssignee) &&
+    (!filterLabel || t.labels.some((l) => l.id === filterLabel)) &&
+    (!filterPriority || t.priority === filterPriority) &&
+    (!overdueOnly || isOverdue(t))
+  const hasFilters = !!(filterAssignee || filterLabel || filterPriority || overdueOnly)
+
   return (
     <div className="space-y-6">
       <div>
@@ -207,10 +248,67 @@ export default function ProjectBoard() {
       </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
 
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-neutral-600">Filter:</span>
+        <select
+          value={filterAssignee}
+          onChange={(e) => setFilterAssignee(e.target.value)}
+          className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1"
+        >
+          <option value="">Everyone</option>
+          {members.map((m) => (
+            <option key={m.userId} value={m.userId}>
+              {m.displayName || m.email}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filterLabel}
+          onChange={(e) => setFilterLabel(e.target.value)}
+          className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1"
+        >
+          <option value="">Any label</option>
+          {labels.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filterPriority}
+          onChange={(e) => setFilterPriority(e.target.value)}
+          className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1"
+        >
+          <option value="">Any priority</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+          <option value="urgent">urgent</option>
+        </select>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} />
+          Overdue only
+        </label>
+        {hasFilters && (
+          <button
+            onClick={() => {
+              setFilterAssignee('')
+              setFilterLabel('')
+              setFilterPriority('')
+              setOverdueOnly(false)
+            }}
+            className="text-neutral-500 underline hover:text-neutral-300"
+          >
+            clear
+          </button>
+        )}
+      </div>
+
       <div className="flex gap-4">
         <div className="flex flex-1 gap-4">
           {COLUMNS.map((col) => {
-            const columnTasks = tasks.filter((t) => t.status === col.status)
+            const columnTasks = tasks.filter((t) => t.status === col.status && visible(t))
             return (
               <section
                 key={col.status}
@@ -241,7 +339,7 @@ export default function ProjectBoard() {
                     <TaskCard
                       key={t.id}
                       task={t}
-                      onOpen={() => setSelected(t)}
+                      onOpen={() => navigate(`/workspaces/${id}/work/${pid}/task/${t.id}`)}
                       onMove={(s) => move(t, s)}
                       onDragStart={() => setSelected(null)}
                     />

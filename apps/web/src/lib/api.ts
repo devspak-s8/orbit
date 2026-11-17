@@ -320,8 +320,24 @@ export interface Task {
   dueDate: string | null
   position: number
   completedAt: string | null
+  labels: TaskLabel[]
   createdAt: string
   updatedAt: string
+}
+
+export interface TaskLabel {
+  id: string
+  name: string
+  color: string
+}
+
+export interface TaskComment {
+  id: string
+  taskId: string
+  body: string
+  authorId: string
+  authorName: string
+  createdAt: string
 }
 
 export function listMembers(workspaceId: string): Promise<Member[]> {
@@ -361,6 +377,10 @@ export function createTask(workspaceId: string, projectId: string, input: TaskIn
   }).then((r) => r.task)
 }
 
+export function getTask(workspaceId: string, taskId: string): Promise<Task> {
+  return api<{ task: Task }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}`).then((r) => r.task)
+}
+
 export function updateTask(
   workspaceId: string,
   taskId: string,
@@ -383,6 +403,44 @@ export function deleteTask(workspaceId: string, taskId: string): Promise<void> {
   return api<{ status: string }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}`, {
     method: 'DELETE',
   }).then(() => undefined)
+}
+
+export function listLabels(workspaceId: string, projectId: string): Promise<TaskLabel[]> {
+  return api<{ labels: TaskLabel[] }>(`/v1/workspaces/${workspaceId}/projects/${projectId}/labels`).then(
+    (r) => r.labels,
+  )
+}
+
+export function createLabel(
+  workspaceId: string,
+  projectId: string,
+  name: string,
+  color: string,
+): Promise<TaskLabel> {
+  return api<{ label: TaskLabel }>(`/v1/workspaces/${workspaceId}/projects/${projectId}/labels`, {
+    method: 'POST',
+    body: JSON.stringify({ name, color }),
+  }).then((r) => r.label)
+}
+
+export function setTaskLabels(workspaceId: string, taskId: string, labelIds: string[]): Promise<Task> {
+  return api<{ task: Task }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}/labels`, {
+    method: 'PUT',
+    body: JSON.stringify({ labelIds }),
+  }).then((r) => r.task)
+}
+
+export function listComments(workspaceId: string, taskId: string): Promise<TaskComment[]> {
+  return api<{ comments: TaskComment[] }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}/comments`).then(
+    (r) => r.comments,
+  )
+}
+
+export function addComment(workspaceId: string, taskId: string, body: string): Promise<TaskComment> {
+  return api<{ comment: TaskComment }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  }).then((r) => r.comment)
 }
 
 export interface Invite {

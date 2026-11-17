@@ -22,9 +22,9 @@ type Comment struct {
 
 // Label is a colored project label.
 type Label struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Color   string `json:"color"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
 }
 
 // Label colors are a fixed palette — no user-supplied CSS anywhere.

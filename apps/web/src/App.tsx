@@ -15,6 +15,7 @@ import Workflows from './pages/Workflows'
 import WorkflowDetail from './pages/WorkflowDetail'
 import WorkModule from './pages/WorkModule'
 import ProjectBoard from './pages/ProjectBoard'
+import TaskDetail from './pages/TaskDetail'
 import DataModule from './pages/DataModule'
 import PublicForm from './pages/PublicForm'
 
@@ -239,6 +240,7 @@ export default function App() {
         <Route path="/workspaces/:id/modules/:moduleId" element={<ModuleRoute />} />
         <Route path="/workspaces/:id/work" element={<WorkModule />} />
         <Route path="/workspaces/:id/work/:pid" element={<ProjectBoard />} />
+        <Route path="/workspaces/:id/work/:pid/task/:tid" element={<TaskDetail />} />
         <Route path="/workspaces/:id/data" element={<DataModule />} />
         <Route path="/workspaces/:id/data/:tid" element={<DataModule />} />
         <Route path="/forms/:token" element={<PublicForm />} />

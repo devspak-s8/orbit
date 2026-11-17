@@ -67,6 +67,7 @@ type Task struct {
 	Position     int        `json:"position"`
 	CompletedAt  *time.Time `json:"completedAt"`
 	CreatedBy    string     `json:"createdBy"`
+	Labels       []Label    `json:"labels"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
 }
@@ -357,15 +358,47 @@ func (s *Service) ListTasks(ctx context.Context, userID, workspaceID, projectID,
 		}
 		items = append(items, t)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Attach labels in one query for the whole batch.
+	ids := make([]string, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
+	}
+	labels, err := s.taskLabels(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if ls, ok := labels[items[i].ID]; ok {
+			items[i].Labels = ls
+		} else {
+			items[i].Labels = []Label{}
+		}
+	}
+	return items, nil
 }
 
-// GetTask loads one task, enforcing workspace scope.
+// GetTask loads one task, enforcing workspace scope, with its labels.
 func (s *Service) GetTask(ctx context.Context, userID, workspaceID, taskID string) (Task, error) {
 	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
 		return Task{}, err
 	}
-	return s.loadTask(ctx, workspaceID, taskID)
+	t, err := s.loadTask(ctx, workspaceID, taskID)
+	if err != nil {
+		return Task{}, err
+	}
+	labels, err := s.taskLabels(ctx, []string{t.ID})
+	if err != nil {
+		return Task{}, err
+	}
+	if ls, ok := labels[t.ID]; ok {
+		t.Labels = ls
+	} else {
+		t.Labels = []Label{}
+	}
+	return t, nil
 }
 
 func (s *Service) loadTask(ctx context.Context, workspaceID, taskID string) (Task, error) {
