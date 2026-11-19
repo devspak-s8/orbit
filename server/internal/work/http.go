@@ -27,6 +27,18 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("PUT /v1/workspaces/{id}/tasks/{tid}/labels", s.handleSetTaskLabels)
 	api.HandleFunc("GET /v1/workspaces/{id}/tasks/{tid}/comments", s.handleListComments)
 	api.HandleFunc("POST /v1/workspaces/{id}/tasks/{tid}/comments", s.handleAddComment)
+	api.HandleFunc("GET /v1/workspaces/{id}/tasks/{tid}/subtasks", s.handleListSubtasks)
+	api.HandleFunc("POST /v1/workspaces/{id}/tasks/{tid}/subtasks", s.handleAddSubtask)
+	api.HandleFunc("PATCH /v1/workspaces/{id}/subtasks/{sid}", s.handleUpdateSubtask)
+	api.HandleFunc("DELETE /v1/workspaces/{id}/subtasks/{sid}", s.handleDeleteSubtask)
+	api.HandleFunc("GET /v1/workspaces/{id}/tasks/{tid}/dependencies", s.handleGetDependencies)
+	api.HandleFunc("POST /v1/workspaces/{id}/tasks/{tid}/dependencies", s.handleAddDependency)
+	api.HandleFunc("DELETE /v1/workspaces/{id}/tasks/{tid}/dependencies", s.handleRemoveDependency)
+	api.HandleFunc("POST /v1/workspaces/{id}/tasks/{tid}/time/start", s.handleStartTime)
+	api.HandleFunc("POST /v1/workspaces/{id}/tasks/{tid}/time/stop", s.handleStopTime)
+	api.HandleFunc("GET /v1/workspaces/{id}/tasks/{tid}/time", s.handleListTime)
+	api.HandleFunc("POST /v1/workspaces/{id}/tasks/{tid}/time", s.handleLogTime)
+	api.HandleFunc("DELETE /v1/workspaces/{id}/time/{eid}", s.handleDeleteTime)
 	api.HandleFunc("DELETE /v1/workspaces/{id}/tasks/{tid}", s.handleDeleteTask)
 }
 
@@ -298,6 +310,217 @@ func (s *Service) handleAddComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apijson.WriteJSON(w, http.StatusCreated, map[string]any{"comment": c})
+}
+
+func (s *Service) handleListSubtasks(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	items, err := s.ListSubtasks(r.Context(), userID, wsID, r.PathValue("tid"))
+	if err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	if items == nil {
+		items = []Subtask{}
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"subtasks": items})
+}
+
+func (s *Service) handleAddSubtask(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Title string `json:"title"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	st, err := s.CreateSubtask(r.Context(), userID, wsID, r.PathValue("tid"), req.Title)
+	if err != nil {
+		writeExtrasError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusCreated, map[string]any{"subtask": st})
+}
+
+func (s *Service) handleUpdateSubtask(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Title *string `json:"title"`
+		Done  *bool   `json:"done"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	st, err := s.UpdateSubtask(r.Context(), userID, wsID, r.PathValue("sid"), req.Title, req.Done)
+	if err != nil {
+		writeExtrasError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"subtask": st})
+}
+
+func (s *Service) handleDeleteSubtask(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	if err := s.DeleteSubtask(r.Context(), userID, wsID, r.PathValue("sid")); err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (s *Service) handleGetDependencies(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	info, err := s.DependencyInfo(r.Context(), userID, wsID, r.PathValue("tid"))
+	if err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, info)
+}
+
+func (s *Service) handleAddDependency(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		BlocksTaskID string `json:"blocksTaskId"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if err := s.AddDependency(r.Context(), userID, wsID, r.PathValue("tid"), req.BlocksTaskID); err != nil {
+		writeExtrasError(w, err)
+		return
+	}
+	info, err := s.DependencyInfo(r.Context(), userID, wsID, r.PathValue("tid"))
+	if err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusCreated, info)
+}
+
+func (s *Service) handleRemoveDependency(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		BlocksTaskID string `json:"blocksTaskId"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if err := s.RemoveDependency(r.Context(), userID, wsID, r.PathValue("tid"), req.BlocksTaskID); err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	info, err := s.DependencyInfo(r.Context(), userID, wsID, r.PathValue("tid"))
+	if err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, info)
+}
+
+func (s *Service) handleStartTime(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	e, err := s.StartTimer(r.Context(), userID, wsID, r.PathValue("tid"))
+	if err != nil {
+		writeExtrasError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusCreated, map[string]any{"entry": e})
+}
+
+func (s *Service) handleStopTime(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	e, err := s.StopTimer(r.Context(), userID, wsID, r.PathValue("tid"))
+	if err != nil {
+		writeExtrasError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"entry": e})
+}
+
+func (s *Service) handleLogTime(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Minutes int    `json:"minutes"`
+		Note    string `json:"note"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	e, err := s.LogTime(r.Context(), userID, wsID, r.PathValue("tid"), req.Minutes, req.Note)
+	if err != nil {
+		writeExtrasError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusCreated, map[string]any{"entry": e})
+}
+
+func (s *Service) handleListTime(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	items, err := s.ListTime(r.Context(), userID, wsID, r.PathValue("tid"))
+	if err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	if items == nil {
+		items = []TimeEntry{}
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"entries": items})
+}
+
+func (s *Service) handleDeleteTime(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	if err := s.DeleteTimeEntry(r.Context(), userID, wsID, r.PathValue("eid")); err != nil {
+		writeWorkError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func writeExtrasError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrSubtaskTitle), errors.Is(err, ErrDependency),
+		errors.Is(err, ErrTimeRunning), errors.Is(err, ErrTimeNotActive),
+		errors.Is(err, ErrTimeMinutes), errors.Is(err, ErrCycle):
+		apijson.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	default:
+		writeWorkError(w, err)
+	}
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {

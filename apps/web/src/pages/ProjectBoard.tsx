@@ -15,6 +15,9 @@ import {
   type TaskLabel,
   type TaskStatus,
 } from '../lib/api'
+import { CalendarView, ListView, TimelineView } from '../components/ProjectViews'
+
+type ViewMode = 'board' | 'list' | 'calendar' | 'timeline'
 
 const COLUMNS: { status: TaskStatus; label: string }[] = [
   { status: 'todo', label: 'To Do' },
@@ -139,6 +142,7 @@ export default function ProjectBoard() {
   const [filterLabel, setFilterLabel] = useState('')
   const [filterPriority, setFilterPriority] = useState('')
   const [overdueOnly, setOverdueOnly] = useState(false)
+  const [view, setView] = useState<ViewMode>('board')
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Task | null>(null)
   const [quickAdd, setQuickAdd] = useState('')
@@ -248,6 +252,26 @@ export default function ProjectBoard() {
       </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
 
+      {/* View switcher */}
+      <div className="flex gap-1" role="tablist" aria-label="Project views">
+        {(['board', 'list', 'calendar', 'timeline'] as ViewMode[]).map((v) => (
+          <button
+            key={v}
+            role="tab"
+            aria-selected={view === v}
+            onClick={() => setView(v)}
+            className={
+              'rounded-lg border px-3 py-1.5 text-xs capitalize transition-colors ' +
+              (view === v
+                ? 'border-emerald-700 bg-emerald-900/30 text-emerald-300'
+                : 'border-neutral-800 text-neutral-400 hover:border-neutral-600')
+            }
+          >
+            {v}
+          </button>
+        ))}
+      </div>
+
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-neutral-600">Filter:</span>
@@ -305,6 +329,17 @@ export default function ProjectBoard() {
         )}
       </div>
 
+      {view === 'list' && (
+        <ListView tasks={tasks.filter(visible)} onOpen={(t) => navigate(`/workspaces/${id}/work/${pid}/task/${t.id}`)} />
+      )}
+      {view === 'calendar' && (
+        <CalendarView tasks={tasks.filter(visible)} onOpen={(t) => navigate(`/workspaces/${id}/work/${pid}/task/${t.id}`)} />
+      )}
+      {view === 'timeline' && (
+        <TimelineView tasks={tasks.filter(visible)} onOpen={(t) => navigate(`/workspaces/${id}/work/${pid}/task/${t.id}`)} />
+      )}
+
+      {view === 'board' && (
       <div className="flex gap-4">
         <div className="flex flex-1 gap-4">
           {COLUMNS.map((col) => {
@@ -450,6 +485,7 @@ export default function ProjectBoard() {
           </aside>
         )}
       </div>
+      )}
     </div>
   )
 }

@@ -2,20 +2,36 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   addComment,
+  addDependency,
   ApiError,
   createLabel,
+  createSubtask,
+  deleteSubtask,
   deleteTask,
+  deleteTimeEntry,
+  getDependencies,
+  getProject,
   getTask,
   listComments,
   listLabels,
   listMembers,
+  listSubtasks,
+  listTime,
+  logTime,
+  removeDependency,
   setTaskLabels,
   setTaskStatus,
+  startTime,
+  stopTime,
+  updateSubtask,
   updateTask,
+  type DependencyInfo,
   type Member,
+  type Subtask,
   type Task,
   type TaskComment,
   type TaskLabel,
+  type TimeEntry,
   type TaskStatus,
 } from '../lib/api'
 
@@ -48,6 +64,296 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
   { value: 'in_progress', label: 'In Progress' },
   { value: 'done', label: 'Done' },
 ]
+
+/* --- Subtasks --- */
+function SubtasksSection({ workspaceId, taskId }: { workspaceId: string; taskId: string }) {
+  const [subtasks, setSubtasks] = useState<Subtask[] | null>(null)
+  const [title, setTitle] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  function load() {
+    listSubtasks(workspaceId, taskId).then(setSubtasks).catch(() => setSubtasks([]))
+  }
+  useEffect(load, [workspaceId, taskId])
+
+  async function add() {
+    if (!title.trim()) return
+    try {
+      await createSubtask(workspaceId, taskId, title.trim())
+      setTitle('')
+      load()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed')
+    }
+  }
+
+  const done = subtasks?.filter((s) => s.done).length ?? 0
+  const total = subtasks?.length ?? 0
+
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+          Subtasks {total > 0 && <span className="text-neutral-700">({done}/{total})</span>}
+        </h2>
+        {total > 0 && (
+          <div className="h-1 w-24 overflow-hidden rounded-full bg-neutral-800">
+            <div className="h-full bg-emerald-500" style={{ width: `${(done / total) * 100}%` }} />
+          </div>
+        )}
+      </div>
+      <ul className="space-y-1.5">
+        {subtasks?.map((st) => (
+          <li key={st.id} className="group flex items-center gap-2.5 text-sm">
+            <input
+              type="checkbox"
+              checked={st.done}
+              onChange={() =>
+                updateSubtask(workspaceId, st.id, { done: !st.done }).then(() => load())
+              }
+              className="h-4 w-4 accent-emerald-500"
+            />
+            <span className={st.done ? 'flex-1 text-neutral-500 line-through' : 'flex-1'}>{st.title}</span>
+            <button
+              onClick={() => deleteSubtask(workspaceId, st.id).then(load)}
+              className="text-neutral-700 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
+              aria-label="Delete subtask"
+            >
+              ×
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 flex gap-2 border-t border-neutral-800 pt-3">
+        <input
+          type="text"
+          placeholder="Add a subtask…"
+          value={title}
+          maxLength={500}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && add()}
+          className="flex-1 rounded border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-xs focus:border-neutral-500 focus:outline-none"
+        />
+        <button onClick={add} className="rounded border border-neutral-700 px-3 py-1.5 text-xs hover:border-neutral-500">
+          Add
+        </button>
+      </div>
+      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+/* --- Dependencies --- */
+function DependenciesSection({
+  workspaceId,
+  projectId,
+  taskId,
+}: {
+  workspaceId: string
+  projectId: string
+  taskId: string
+}) {
+  const [info, setInfo] = useState<DependencyInfo | null>(null)
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [selected, setSelected] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  function load() {
+    getDependencies(workspaceId, taskId).then(setInfo).catch(() => {})
+    getProject(workspaceId, projectId)
+      .then((r) => setTasks(r.tasks.filter((t) => t.id !== taskId)))
+      .catch(() => {})
+  }
+  useEffect(load, [workspaceId, projectId, taskId])
+
+  async function add() {
+    if (!selected) return
+    setError(null)
+    try {
+      const updated = await addDependency(workspaceId, taskId, selected)
+      setInfo(updated)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed')
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
+      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-neutral-500">
+        Dependencies
+      </h2>
+      {info && (
+        <div className="space-y-3">
+          {info.blockedBy.length > 0 && (
+            <div>
+              <div className="text-[11px] text-neutral-600">Blocked by</div>
+              <ul className="mt-1 space-y-1">
+                {info.blockedBy.map((b) => (
+                  <li key={b.id} className="flex items-center justify-between rounded border border-neutral-800 px-2.5 py-1.5 text-sm">
+                    <span>
+                      <Link to={`../task/${b.id}`} className="hover:text-emerald-300">{b.title}</Link>
+                      {b.status !== 'done' && <span className="ml-1.5 text-[10px] text-amber-400">incomplete</span>}
+                    </span>
+                    <button
+                      onClick={() => removeDependency(workspaceId, taskId, b.id).then(setInfo)}
+                      className="text-xs text-neutral-600 hover:text-red-400"
+                    >
+                      remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {info.blocks.length > 0 && (
+            <div>
+              <div className="text-[11px] text-neutral-600">Blocks</div>
+              <ul className="mt-1 space-y-1">
+                {info.blocks.map((b) => (
+                  <li key={b.id} className="rounded border border-neutral-800 px-2.5 py-1.5 text-sm">
+                    <Link to={`../task/${b.id}`} className="hover:text-emerald-300">{b.title}</Link>
+                    <span className="ml-1.5 text-[10px] text-neutral-500">{b.status}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {info.blockedBy.length === 0 && info.blocks.length === 0 && (
+            <p className="text-xs text-neutral-600">No dependencies — this task is independent.</p>
+          )}
+        </div>
+      )}
+      <div className="mt-3 flex gap-2 border-t border-neutral-800 pt-3">
+        <select
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+          className="flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
+        >
+          <option value="">Blocked by… (pick a task)</option>
+          {tasks.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.title}
+            </option>
+          ))}
+        </select>
+        <button onClick={add} disabled={!selected} className="rounded border border-neutral-700 px-3 py-1.5 text-xs hover:border-neutral-500 disabled:opacity-50">
+          Add blocker
+        </button>
+      </div>
+      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+/* --- Time tracking --- */
+function TimeSection({ workspaceId, taskId }: { workspaceId: string; taskId: string }) {
+  const [entries, setEntries] = useState<TimeEntry[] | null>(null)
+  const [running, setRunning] = useState(false)
+  const [minutes, setMinutes] = useState('')
+  const [note, setNote] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  function load() {
+    listTime(workspaceId, taskId).then((list) => {
+      setEntries(list)
+      setRunning(list.some((e) => !e.endedAt))
+    }).catch(() => setEntries([]))
+  }
+  useEffect(load, [workspaceId, taskId])
+
+  const total = entries?.reduce((sum, e) => sum + e.minutes, 0) ?? 0
+
+  async function toggle() {
+    setError(null)
+    try {
+      if (running) {
+        await stopTime(workspaceId, taskId)
+      } else {
+        await startTime(workspaceId, taskId)
+      }
+      load()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed')
+    }
+  }
+
+  async function log(e: FormEvent) {
+    e.preventDefault()
+    const m = parseInt(minutes, 10)
+    if (!m || m < 1) return
+    setError(null)
+    try {
+      await logTime(workspaceId, taskId, m, note)
+      setMinutes('')
+      setNote('')
+      load()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed')
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+          Time {total > 0 && <span className="text-neutral-700">{Math.floor(total / 60)}h {total % 60}m</span>}
+        </h2>
+        <button
+          onClick={toggle}
+          className={
+            'rounded px-3 py-1.5 text-xs font-medium ' +
+            (running ? 'bg-red-500/80 text-black hover:bg-red-400' : 'bg-emerald-500 text-black hover:bg-emerald-400')
+          }
+        >
+          {running ? '■ Stop' : '▶ Start timer'}
+        </button>
+      </div>
+      {entries !== null && entries.length > 0 && (
+        <ul className="mb-3 space-y-1">
+          {entries.map((e) => (
+            <li key={e.id} className="flex items-center justify-between rounded border border-neutral-800/60 px-2.5 py-1.5 text-xs">
+              <span>
+                <span className="font-medium text-neutral-200">{e.userName || 'Someone'}</span>
+                {e.endedAt ? ` · ${e.minutes}m` : ' · running…'}
+                {e.note && <span className="text-neutral-500"> · {e.note}</span>}
+              </span>
+              <button
+                onClick={() => deleteTimeEntry(workspaceId, e.id).then(load)}
+                className="text-neutral-700 hover:text-red-400"
+                aria-label="Delete entry"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={log} className="flex gap-2 border-t border-neutral-800 pt-3">
+        <input
+          type="number"
+          min={1}
+          max={1440}
+          placeholder="min"
+          value={minutes}
+          onChange={(e) => setMinutes(e.target.value)}
+          className="w-16 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs focus:border-neutral-500 focus:outline-none"
+        />
+        <input
+          type="text"
+          placeholder="Note (optional)"
+          maxLength={500}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs focus:border-neutral-500 focus:outline-none"
+        />
+        <button type="submit" className="rounded border border-neutral-700 px-3 py-1.5 text-xs hover:border-neutral-500">
+          Log
+        </button>
+      </form>
+      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+    </div>
+  )
+}
 
 export default function TaskDetail() {
   const { id: wsId, pid, tid } = useParams<{ id: string; pid: string; tid: string }>()
@@ -332,6 +638,15 @@ export default function TaskDetail() {
           </span>
         </div>
       </div>
+
+      {/* Subtasks */}
+      <SubtasksSection workspaceId={wsId!} taskId={task.id} />
+
+      {/* Dependencies */}
+      <DependenciesSection workspaceId={wsId!} projectId={task.projectId} taskId={task.id} />
+
+      {/* Time tracking */}
+      <TimeSection workspaceId={wsId!} taskId={task.id} />
 
       {/* Comments */}
       <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">

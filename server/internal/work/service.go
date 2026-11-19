@@ -564,6 +564,51 @@ func (s *Service) SetTaskStatus(ctx context.Context, userID, workspaceID, taskID
 				return Task{}, err
 			}
 		}
+		// Completing a task clears active timers and unblocks dependents.
+		if evtType == "task.completed" {
+			if _, err := tx.Exec(ctx,
+				`UPDATE module_work.time_entries
+				 SET ended_at = now(),
+				     minutes = GREATEST(1, EXTRACT(EPOCH FROM (now() - started_at)) / 60)::int
+				 WHERE task_id = $1 AND ended_at IS NULL`,
+				taskID,
+			); err != nil {
+				return Task{}, fmt.Errorf("clear timers: %w", err)
+			}
+			// Every task that this one blocked and that now has no
+			// remaining incomplete blockers publishes task.unblocked.
+			rows, err := tx.Query(ctx,
+				`SELECT d.task_id::text FROM module_work.dependencies d
+				 WHERE d.blocks_task_id = $1
+				   AND NOT EXISTS (
+				     SELECT 1 FROM module_work.dependencies d2
+				     JOIN module_work.tasks t2 ON t2.id = d2.blocks_task_id
+				     WHERE d2.task_id = d.task_id AND t2.status <> 'done'
+				   )`,
+				taskID,
+			)
+			if err != nil {
+				return Task{}, fmt.Errorf("find unblocked: %w", err)
+			}
+			var unblocked []string
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return Task{}, err
+				}
+				unblocked = append(unblocked, id)
+			}
+			rows.Close()
+			for _, id := range unblocked {
+				if err := s.events.PublishTx(ctx, tx, events.Event{
+					Type: "task.unblocked", WorkspaceID: workspaceID, ActorUserID: userID,
+					Payload: map[string]any{"taskId": id, "unblockedBy": taskID},
+				}); err != nil {
+					return Task{}, err
+				}
+			}
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Task{}, fmt.Errorf("commit: %w", err)

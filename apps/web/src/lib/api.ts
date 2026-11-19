@@ -488,6 +488,112 @@ export function addComment(workspaceId: string, taskId: string, body: string): P
   }).then((r) => r.comment)
 }
 
+export interface Subtask {
+  id: string
+  taskId: string
+  title: string
+  done: boolean
+  position: number
+  createdAt: string
+}
+
+export interface TaskBrief {
+  id: string
+  title: string
+  status: string
+}
+
+export interface DependencyInfo {
+  blockedBy: TaskBrief[]
+  blocks: TaskBrief[]
+}
+
+export interface TimeEntry {
+  id: string
+  taskId: string
+  userId: string
+  userName: string
+  minutes: number
+  note: string
+  startedAt: string
+  endedAt: string | null
+}
+
+export function listSubtasks(workspaceId: string, taskId: string): Promise<Subtask[]> {
+  return api<{ subtasks: Subtask[] }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}/subtasks`).then(
+    (r) => r.subtasks,
+  )
+}
+
+export function createSubtask(workspaceId: string, taskId: string, title: string): Promise<Subtask> {
+  return api<{ subtask: Subtask }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}/subtasks`, {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  }).then((r) => r.subtask)
+}
+
+export function updateSubtask(
+  workspaceId: string,
+  subtaskId: string,
+  patch: { title?: string; done?: boolean },
+): Promise<Subtask> {
+  return api<{ subtask: Subtask }>(`/v1/workspaces/${workspaceId}/subtasks/${subtaskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  }).then((r) => r.subtask)
+}
+
+export function deleteSubtask(workspaceId: string, subtaskId: string): Promise<void> {
+  return api(`/v1/workspaces/${workspaceId}/subtasks/${subtaskId}`, { method: 'DELETE' }).then(() => undefined)
+}
+
+export function getDependencies(workspaceId: string, taskId: string): Promise<DependencyInfo> {
+  return api(`/v1/workspaces/${workspaceId}/tasks/${taskId}/dependencies`)
+}
+
+export function addDependency(workspaceId: string, taskId: string, blocksTaskId: string): Promise<DependencyInfo> {
+  return api(`/v1/workspaces/${workspaceId}/tasks/${taskId}/dependencies`, {
+    method: 'POST',
+    body: JSON.stringify({ blocksTaskId }),
+  })
+}
+
+export function removeDependency(workspaceId: string, taskId: string, blocksTaskId: string): Promise<DependencyInfo> {
+  return api(`/v1/workspaces/${workspaceId}/tasks/${taskId}/dependencies`, {
+    method: 'DELETE',
+    body: JSON.stringify({ blocksTaskId }),
+  })
+}
+
+export function startTime(workspaceId: string, taskId: string): Promise<TimeEntry> {
+  return api<{ entry: TimeEntry }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}/time/start`, {
+    method: 'POST',
+  }).then((r) => r.entry)
+}
+
+export function stopTime(workspaceId: string, taskId: string): Promise<TimeEntry> {
+  return api<{ entry: TimeEntry }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}/time/stop`, {
+    method: 'POST',
+  }).then((r) => r.entry)
+}
+
+export function logTime(workspaceId: string, taskId: string, minutes: number, note: string): Promise<TimeEntry> {
+  return api<{ entry: TimeEntry }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}/time`, {
+    method: 'POST',
+    body: JSON.stringify({ minutes, note }),
+  }).then((r) => r.entry)
+}
+
+export function listTime(workspaceId: string, taskId: string): Promise<TimeEntry[]> {
+  return api<{ entries: TimeEntry[] }>(`/v1/workspaces/${workspaceId}/tasks/${taskId}/time`).then(
+    (r) => r.entries,
+  )
+}
+
+export function deleteTimeEntry(workspaceId: string, entryId: string): Promise<void> {
+  return api(`/v1/workspaces/${workspaceId}/time/${entryId}`, { method: 'DELETE' }).then(() => undefined)
+}
+
 export interface Invite {
   code: string
   workspaceId: string
