@@ -193,7 +193,7 @@ export interface WorkflowDefinition {
   }
   nodes: Array<{
     id: string
-    type: 'http' | 'log' | 'email'
+    type: 'http' | 'log' | 'email' | 'branch'
     config: {
       method?: string
       url?: string
@@ -203,11 +203,12 @@ export interface WorkflowDefinition {
       to?: string
       subject?: string
       text?: string
+      condition?: { field: string; op: string; value: unknown }
       retries?: number
       timeoutMs?: number
     }
   }>
-  edges: Array<{ from: string; to: string }>
+  edges: Array<{ from: string; to: string; label?: string }>
   timeoutMs?: number
 }
 
@@ -233,6 +234,29 @@ export interface WorkflowStep {
   error: string
   startedAt: string | null
   finishedAt: string | null
+}
+
+export interface APITokenRecord {
+  id: string
+  name: string
+  createdAt: string
+  lastUsedAt: string | null
+  revokedAt: string | null
+}
+
+export function listAPITokens(): Promise<APITokenRecord[]> {
+  return api<{ tokens: APITokenRecord[] }>('/v1/tokens').then((r) => r.tokens)
+}
+
+export function createAPIToken(name: string): Promise<{ token: APITokenRecord; secret: string }> {
+  return api<{ token: APITokenRecord; secret: string }>('/v1/tokens', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function revokeAPIToken(tokenId: string): Promise<void> {
+  return api(`/v1/tokens/${tokenId}`, { method: 'DELETE' }).then(() => undefined)
 }
 
 export function listWorkflows(workspaceId: string): Promise<Workflow[]> {
@@ -270,6 +294,27 @@ export function runWorkflow(workspaceId: string, workflowId: string): Promise<Wo
 
 export function listWorkflowRuns(workspaceId: string, workflowId: string): Promise<WorkflowRun[]> {
   return api<{ runs: WorkflowRun[] }>(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/runs`).then((r) => r.runs)
+}
+
+export function cancelWorkflowRun(
+  workspaceId: string,
+  workflowId: string,
+  runId: string,
+): Promise<void> {
+  return api(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/runs/${runId}/cancel`, {
+    method: 'POST',
+  }).then(() => undefined)
+}
+
+export function updateWorkflow(
+  workspaceId: string,
+  workflowId: string,
+  patch: { name?: string; definition?: WorkflowDefinition },
+): Promise<Workflow> {
+  return api<{ workflow: Workflow }>(`/v1/workspaces/${workspaceId}/workflows/${workflowId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  }).then((r) => r.workflow)
 }
 
 export function getWorkflowRun(

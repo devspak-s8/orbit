@@ -182,6 +182,101 @@ func (s *Service) Validate(ctx context.Context, userID, workspaceID, workflowID 
 	return wf, nil
 }
 
+// UpdateWorkflow edits a workflow's name and/or definition. The new
+// definition is validated and stored as a new version; the workflow drops
+// to draft and must be re-validated before it runs again (execution
+// safety: no definition changes under a ready workflow).
+func (s *Service) UpdateWorkflow(ctx context.Context, userID, workspaceID, workflowID string, name *string, def *Definition) (Workflow, error) {
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return Workflow{}, err
+	}
+	wf, current, err := s.load(ctx, workspaceID, workflowID)
+	if err != nil {
+		return Workflow{}, err
+	}
+	if wf.Status == "archived" {
+		return Workflow{}, ErrWorkflowNotFound
+	}
+	if def != nil {
+		if err := def.Validate(); err != nil {
+			return Workflow{}, fmt.Errorf("%w: %s", ErrInvalidDefinition, err)
+		}
+	}
+	newName := wf.Name
+	if name != nil {
+		n := strings.TrimSpace(*name)
+		if n == "" || len(n) > 120 {
+			return Workflow{}, ErrInvalidInput
+		}
+		newName = n
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Workflow{}, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	newVersion := wf.CurrentVersion
+	if def != nil {
+		newVersion++
+		raw, err := json.Marshal(def)
+		if err != nil {
+			return Workflow{}, fmt.Errorf("marshal definition: %w", err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO workflow_versions (workflow_id, version, definition) VALUES ($1, $2, $3)`,
+			workflowID, newVersion, raw,
+		); err != nil {
+			return Workflow{}, fmt.Errorf("insert version: %w", err)
+		}
+	}
+	// Editing always returns the workflow to draft: re-validation is the
+	// gate that lets it execute again. Webhook tokens and schedule cursors
+	// survive, but accept nothing until ready.
+	if _, err := tx.Exec(ctx,
+		`UPDATE workflows SET name = $3, current_version = $4, status = 'draft', updated_at = now()
+		 WHERE id = $1 AND workspace_id = $2`,
+		workflowID, workspaceID, newName, newVersion,
+	); err != nil {
+		return Workflow{}, fmt.Errorf("update workflow: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Workflow{}, fmt.Errorf("commit: %w", err)
+	}
+
+	_ = current
+	updated, def2, err := s.load(ctx, workspaceID, workflowID)
+	if err != nil {
+		return Workflow{}, err
+	}
+	updated.Definition = &def2
+	return updated, nil
+}
+
+// CancelRun marks a queued or running run cancelled. The worker observes
+// the status between steps and stops; remaining steps are skipped.
+func (s *Service) CancelRun(ctx context.Context, userID, workspaceID, workflowID, runID string) error {
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return err
+	}
+	if _, _, err := s.load(ctx, workspaceID, workflowID); err != nil {
+		return err
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workflow_runs SET status = 'cancelled', finished_at = now()
+		 WHERE id = $1 AND workflow_id = $2 AND status IN ('queued', 'running')`,
+		runID, workflowID,
+	)
+	if err != nil {
+		return fmt.Errorf("cancel run: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRunNotFound
+	}
+	return nil
+}
+
 // Get returns a workflow with its current definition.
 func (s *Service) Get(ctx context.Context, userID, workspaceID, workflowID string) (Workflow, error) {
 	if err := s.requireMember(ctx, userID, workspaceID); err != nil {

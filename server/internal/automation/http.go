@@ -71,10 +71,12 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("POST /v1/workspaces/{id}/workflows", s.handleCreate)
 	api.HandleFunc("GET /v1/workspaces/{id}/workflows", s.handleList)
 	api.HandleFunc("GET /v1/workspaces/{id}/workflows/{wid}", s.handleGet)
+	api.HandleFunc("PATCH /v1/workspaces/{id}/workflows/{wid}", s.handleUpdate)
 	api.HandleFunc("POST /v1/workspaces/{id}/workflows/{wid}/validate", s.handleValidate)
 	api.HandleFunc("POST /v1/workspaces/{id}/workflows/{wid}/run", s.handleRun)
 	api.HandleFunc("GET /v1/workspaces/{id}/workflows/{wid}/runs", s.handleListRuns)
 	api.HandleFunc("GET /v1/workspaces/{id}/workflows/{wid}/runs/{rid}", s.handleGetRun)
+	api.HandleFunc("POST /v1/workspaces/{id}/workflows/{wid}/runs/{rid}/cancel", s.handleCancel)
 }
 
 func (s *Service) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +131,42 @@ func (s *Service) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apijson.WriteJSON(w, http.StatusOK, map[string]any{"workflow": wf})
+}
+
+func (s *Service) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	var req struct {
+		Name       *string     `json:"name"`
+		Definition *Definition `json:"definition"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apijson.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	wf, err := s.UpdateWorkflow(r.Context(), user.ID, r.PathValue("id"), r.PathValue("wid"), req.Name, req.Definition)
+	if err != nil {
+		writeAutomationError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"workflow": wf})
+}
+
+func (s *Service) handleCancel(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	if err := s.CancelRun(r.Context(), user.ID, r.PathValue("id"), r.PathValue("wid"), r.PathValue("rid")); err != nil {
+		writeAutomationError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (s *Service) handleValidate(w http.ResponseWriter, r *http.Request) {

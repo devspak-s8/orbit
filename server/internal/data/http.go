@@ -23,6 +23,8 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("POST /v1/workspaces/{id}/tables", s.handleCreateTable)
 	api.HandleFunc("GET /v1/workspaces/{id}/tables/{tid}", s.handleGetTable)
 	api.HandleFunc("POST /v1/workspaces/{id}/tables/{tid}/columns", s.handleAddColumn)
+	api.HandleFunc("PATCH /v1/workspaces/{id}/columns/{cid}", s.handleRenameColumn)
+	api.HandleFunc("DELETE /v1/workspaces/{id}/columns/{cid}", s.handleDeleteColumn)
 	api.HandleFunc("GET /v1/workspaces/{id}/tables/{tid}/records", s.handleListRecords)
 	api.HandleFunc("POST /v1/workspaces/{id}/tables/{tid}/records", s.handleCreateRecord)
 	api.HandleFunc("POST /v1/workspaces/{id}/tables/{tid}/import", s.handleImportCSV)
@@ -32,10 +34,11 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("DELETE /v1/workspaces/{id}/records/{rid}", s.handleDeleteRecord)
 }
 
-// FormHandlers wires the unauthenticated public form route onto the root
-// mux. The secret is the token in the path.
+// FormHandlers wires the unauthenticated public routes onto the root mux:
+// submissions and the shape spec a public form renders from.
 func (s *Service) FormHandlers(root *http.ServeMux) {
 	root.HandleFunc("POST /forms/{token}", s.handleFormSubmit)
+	root.HandleFunc("GET /forms/{token}/shape", s.handleFormShape)
 }
 
 func (s *Service) gate(w http.ResponseWriter, r *http.Request) (string, string, bool) {
@@ -234,6 +237,48 @@ func (s *Service) handleDeleteRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apijson.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (s *Service) handleRenameColumn(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	col, err := s.RenameColumn(r.Context(), userID, wsID, r.PathValue("cid"), req.Name)
+	if err != nil {
+		writeDataError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"column": col})
+}
+
+func (s *Service) handleDeleteColumn(w http.ResponseWriter, r *http.Request) {
+	userID, wsID, ok := s.gate(w, r)
+	if !ok {
+		return
+	}
+	if err := s.DeleteColumn(r.Context(), userID, wsID, r.PathValue("cid")); err != nil {
+		writeDataError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+// handleFormShape serves the public column spec (GET, no auth — the
+// token is the authorization, exactly like the submit path).
+func (s *Service) handleFormShape(w http.ResponseWriter, r *http.Request) {
+	shape, err := s.FormShape(r.Context(), r.PathValue("token"))
+	if err != nil {
+		apijson.WriteError(w, http.StatusNotFound, "not_found", "not found")
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, shape)
 }
 
 // handleFormSubmit is the public path: any JSON object becomes a record.

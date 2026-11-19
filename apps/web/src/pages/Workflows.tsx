@@ -49,6 +49,26 @@ const templates: Record<string, { label: string; definition: WorkflowDefinition 
       edges: [{ from: 'trigger', to: 'ping' }],
     },
   },
+  branch: {
+    label: 'With a condition (branch)',
+    definition: {
+      trigger: { type: 'webhook' },
+      nodes: [
+        {
+          id: 'gate',
+          type: 'branch',
+          config: { condition: { field: '{{payload.score}}', op: '>', value: 50 } },
+        },
+        { id: 'big', type: 'log', config: { message: 'high score: {{payload.score}}' } },
+        { id: 'small', type: 'log', config: { message: 'low score' } },
+      ],
+      edges: [
+        { from: 'trigger', to: 'gate' },
+        { from: 'gate', to: 'big', label: 'yes' },
+        { from: 'gate', to: 'small', label: 'no' },
+      ],
+    },
+  },
   manual: {
     label: 'Manual run',
     definition: {

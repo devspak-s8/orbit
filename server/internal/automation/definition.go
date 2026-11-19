@@ -37,9 +37,21 @@ type NodeConfig struct {
 	To      string `json:"to,omitempty"`
 	Subject string `json:"subject,omitempty"`
 	Text    string `json:"text,omitempty"`
+	// Branch node: condition on the trigger payload.
+	Condition *Condition `json:"condition,omitempty"`
 	// Both.
 	Retries   int `json:"retries,omitempty"`
 	TimeoutMs int `json:"timeoutMs,omitempty"`
+}
+
+// Condition is a branch predicate over the run's trigger payload.
+type Condition struct {
+	// Field is a template: "{{payload.score}}".
+	Field string `json:"field"`
+	// Op is one of >, >=, <, <=, ==, !=.
+	Op string `json:"op"`
+	// Value is the right-hand side (number or string).
+	Value any `json:"value"`
 }
 
 // Node is one executable step.
@@ -50,9 +62,11 @@ type Node struct {
 }
 
 // Edge connects two nodes; "trigger" is the reserved source of the first.
+// Branch nodes carry exactly two labeled edges: "yes" and "no".
 type Edge struct {
-	From string `json:"from"`
-	To   string `json:"to"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Label string `json:"label,omitempty"` // "yes" | "no" on branch edges
 }
 
 // Definition is the versioned workflow specification (PRD 9.3).
@@ -72,10 +86,11 @@ const (
 )
 
 var (
-	nodeTypes   = map[string]bool{"http": true, "log": true, "email": true}
+	nodeTypes   = map[string]bool{"http": true, "log": true, "email": true, "branch": true}
 	httpMethods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
 	// placeholderPattern matches {{payload.key}} tokens in URL/body values.
 	placeholderPattern = regexp.MustCompile(`\{\{\s*payload\.([a-zA-Z0-9_]+)\s*\}\}`)
+	condOps            = map[string]bool{">": true, ">=": true, "<": true, "<=": true, "==": true, "!=": true}
 )
 
 // Validate checks the definition and returns a combined error listing every
@@ -156,9 +171,26 @@ func (d *Definition) Validate() error {
 				problems = append(problems, fmt.Sprintf("node %q: retries must be 0-5", n.ID))
 			}
 		}
+		if n.Type == "branch" {
+			c := n.Config.Condition
+			if c == nil {
+				problems = append(problems, fmt.Sprintf("node %q: branch requires condition", n.ID))
+			} else {
+				if strings.TrimSpace(c.Field) == "" {
+					problems = append(problems, fmt.Sprintf("node %q: condition requires field", n.ID))
+				}
+				if !condOps[c.Op] {
+					problems = append(problems, fmt.Sprintf("node %q: condition op must be one of > >= < <= == !=", n.ID))
+				}
+				if c.Value == nil {
+					problems = append(problems, fmt.Sprintf("node %q: condition requires value", n.ID))
+				}
+			}
+		}
 	}
 
-	// Walk the chain: exactly one edge out of each source along the way.
+	// Graph shape: non-branch nodes have at most one outgoing edge; a
+	// branch node has exactly two, labeled "yes" and "no".
 	out := map[string][]Edge{}
 	for _, e := range d.Edges {
 		if e.From == "" || e.To == "" {
@@ -176,28 +208,54 @@ func (d *Definition) Validate() error {
 		out[e.From] = append(out[e.From], e)
 	}
 
-	// Chain walk from the trigger.
-	visited := map[string]bool{}
-	cur := "trigger"
-	for {
-		edges := out[cur]
-		if len(edges) == 0 {
-			break
-		}
-		if len(edges) > 1 {
-			problems = append(problems, fmt.Sprintf("node %q has multiple outgoing edges; the alpha executes linear chains only", cur))
-			break
-		}
-		next := edges[0].To
-		if visited[next] {
-			problems = append(problems, "cycle detected in workflow graph")
-			break
-		}
-		visited[next] = true
-		cur = next
-	}
+	branchCount := 0
 	for _, n := range d.Nodes {
-		if !visited[n.ID] {
+		if n.Type == "branch" {
+			branchCount++
+			yes, no := false, false
+			for _, e := range out[n.ID] {
+				switch e.Label {
+				case "yes":
+					yes = true
+				case "no":
+					no = true
+				}
+			}
+			if len(out[n.ID]) != 2 || !yes || !no {
+				problems = append(problems, fmt.Sprintf("branch node %q needs exactly two outgoing edges, labeled yes and no", n.ID))
+			}
+		} else if len(out[n.ID]) > 1 {
+			problems = append(problems, fmt.Sprintf("node %q has multiple outgoing edges; only branch nodes fork", n.ID))
+		}
+	}
+	if branchCount > 1 {
+		problems = append(problems, "at most one branch node is allowed per workflow")
+	}
+
+	// Reachability and acyclicity: DFS from the trigger over all edges
+	// (gray = on current path, black = fully explored).
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	color := map[string]int{"trigger": gray}
+	var dfs func(id string)
+	dfs = func(id string) {
+		for _, e := range out[id] {
+			switch color[e.To] {
+			case gray:
+				problems = append(problems, "cycle detected in workflow graph")
+			case white:
+				color[e.To] = gray
+				dfs(e.To)
+			}
+		}
+		color[id] = black
+	}
+	dfs("trigger")
+	for _, n := range d.Nodes {
+		if color[n.ID] == white {
 			problems = append(problems, fmt.Sprintf("node %q is not reachable from the trigger", n.ID))
 		}
 	}
@@ -208,28 +266,11 @@ func (d *Definition) Validate() error {
 	return nil
 }
 
-// Order returns the nodes in execution order along the validated chain.
-// Must only be called on a validated definition.
+// Order returns the nodes for step-creation purposes. With branch support
+// the runtime walks the graph per run; every node gets a step row, and
+// untaken branch paths are marked skipped during execution.
 func (d *Definition) Order() []Node {
-	out := map[string]Edge{}
-	for _, e := range d.Edges {
-		out[e.From] = e
-	}
-	byID := map[string]Node{}
-	for _, n := range d.Nodes {
-		byID[n.ID] = n
-	}
-	var order []Node
-	cur := out["trigger"].To
-	for cur != "" {
-		order = append(order, byID[cur])
-		if e, ok := out[cur]; ok {
-			cur = e.To
-		} else {
-			cur = ""
-		}
-	}
-	return order
+	return d.Nodes
 }
 
 // nodeTimeout returns the configured timeout in milliseconds, or the default.

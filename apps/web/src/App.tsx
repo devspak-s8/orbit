@@ -18,6 +18,7 @@ import ProjectBoard from './pages/ProjectBoard'
 import TaskDetail from './pages/TaskDetail'
 import DataModule from './pages/DataModule'
 import PublicForm from './pages/PublicForm'
+import APITokens from './pages/APITokens'
 
 function Home({ user }: { user: User }) {
   return (
@@ -151,6 +152,9 @@ function Shell({
           <Link to="/workspaces" className="rounded px-2 py-1.5 hover:bg-neutral-900 hover:text-neutral-100">
             Workspaces
           </Link>
+          <Link to="/tokens" className="rounded px-2 py-1.5 hover:bg-neutral-900 hover:text-neutral-100">
+            API tokens
+          </Link>
         </nav>
         <div className="mt-auto space-y-2 text-xs">
           <NotificationBell />
@@ -244,6 +248,7 @@ export default function App() {
         <Route path="/workspaces/:id/data" element={<DataModule />} />
         <Route path="/workspaces/:id/data/:tid" element={<DataModule />} />
         <Route path="/forms/:token" element={<PublicForm />} />
+        <Route path="/tokens" element={<APITokens />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Shell>

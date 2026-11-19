@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ApiError,
+  cancelWorkflowRun,
   getWorkflow,
   getWorkflowRun,
   listWorkflowRuns,
   runWorkflow,
+  updateWorkflow,
   validateWorkflow,
   type Workflow,
   type WorkflowRun,
@@ -66,6 +68,8 @@ export default function WorkflowDetail() {
   const [workflow, setWorkflow] = useState<Workflow | null>(null)
   const [selected, setSelected] = useState<{ run: WorkflowRun; steps: WorkflowStep[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [editJSON, setEditJSON] = useState('')
 
   function load() {
     if (!id || !wid) return
@@ -88,6 +92,31 @@ export default function WorkflowDetail() {
     }
   }
 
+  async function cancelRun(runId: string) {
+    if (!id || !wid) return
+    setError(null)
+    try {
+      await cancelWorkflowRun(id, wid, runId)
+      load()
+    } catch (err) {
+      showError(err)
+    }
+  }
+
+  async function saveEdit() {
+    if (!id || !wid || !workflow) return
+    setError(null)
+    try {
+      const def = JSON.parse(editJSON)
+      const updated = await updateWorkflow(id, wid, { definition: def })
+      setWorkflow(updated)
+      setEditing(false)
+      load()
+    } catch (err) {
+      showError(err)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -97,7 +126,7 @@ export default function WorkflowDetail() {
         <h1 className="mt-2 text-2xl font-semibold">Execution history</h1>
       </div>
 
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <button
           onClick={() => runWorkflow(id!, wid!).then(load).catch(showError)}
           className="rounded bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 hover:bg-white"
@@ -105,12 +134,53 @@ export default function WorkflowDetail() {
           Run now
         </button>
         <button
-          onClick={() => validateWorkflow(id!, wid!).then(load).catch(showError)}
+          onClick={() => validateWorkflow(id!, wid!).then((w) => { setWorkflow(w); load(); }).catch(showError)}
           className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:border-neutral-500"
         >
           Validate
         </button>
+        {!editing && (
+          <button
+            onClick={() => {
+              setEditJSON(JSON.stringify(workflow?.definition ?? {}, null, 2))
+              setEditing(true)
+            }}
+            className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:border-neutral-500"
+          >
+            Edit definition
+          </button>
+        )}
       </div>
+
+      {editing && (
+        <div className="max-w-3xl rounded-lg border border-neutral-800 bg-neutral-900/50 p-4">
+          <p className="mb-2 text-xs text-neutral-500">
+            Saving returns the workflow to <span className="text-neutral-300">draft</span> — it must be
+            re-validated before it runs again. Existing runs are untouched.
+          </p>
+          <textarea
+            rows={12}
+            spellCheck={false}
+            value={editJSON}
+            onChange={(e) => setEditJSON(e.target.value)}
+            className="w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-xs focus:border-neutral-500 focus:outline-none"
+          />
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={saveEdit}
+              className="rounded bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 hover:bg-white"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => setEditing(false)}
+              className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:border-neutral-500"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
@@ -135,9 +205,30 @@ export default function WorkflowDetail() {
                   <span className="font-mono text-xs text-neutral-500">{r.id.slice(0, 8)}</span>
                   <span className={statusColor(r.status)}>{r.status}</span>
                 </div>
-                <div className="mt-1 text-xs text-neutral-500">
-                  {r.triggerType} · {new Date(r.createdAt).toLocaleString()}
-                  {r.error && <span className="ml-2 text-red-400">{r.error}</span>}
+                <div className="mt-1 flex items-center justify-between text-xs text-neutral-500">
+                  <span>
+                    {r.triggerType} · {new Date(r.createdAt).toLocaleString()}
+                    {r.error && <span className="ml-2 text-red-400">{r.error}</span>}
+                  </span>
+                  {(r.status === 'queued' || r.status === 'running') && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        cancelRun(r.id)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.stopPropagation()
+                          cancelRun(r.id)
+                        }
+                      }}
+                      className="text-red-400 hover:text-red-300"
+                    >
+                      Cancel run
+                    </span>
+                  )}
                 </div>
               </button>
             </li>

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/orbit-org/orbit/server/internal/apijson"
@@ -21,23 +22,100 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("POST /v1/auth/login", s.rateLimit(limiter, s.handleLogin))
 	api.HandleFunc("POST /v1/auth/logout", s.handleLogout)
 	api.Handle("GET /v1/me", s.RequireUser(http.HandlerFunc(s.handleMe)))
+
+	// API tokens (user-scoped, Bearer credentials).
+	api.Handle("GET /v1/tokens", s.RequireUser(http.HandlerFunc(s.handleListTokens)))
+	api.Handle("POST /v1/tokens", s.RequireUser(http.HandlerFunc(s.handleCreateToken)))
+	api.Handle("DELETE /v1/tokens/{tid}", s.RequireUser(http.HandlerFunc(s.handleRevokeToken)))
 }
 
-// RequireUser guards a handler with session authentication.
-func (s *Service) RequireUser(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, err := r.Cookie(sessionCookieName)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+func (s *Service) handleListTokens(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	items, err := s.ListAPITokens(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "an internal error occurred")
+		return
+	}
+	if items == nil {
+		items = []APIToken{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": items})
+}
+
+func (s *Service) handleCreateToken(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	token, secret, err := s.CreateAPIToken(r.Context(), user.ID, req.Name)
+	if err != nil {
+		if errors.Is(err, ErrTokenNameRequired) {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		user, err := s.UserBySessionToken(r.Context(), raw.Value)
-		if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "an internal error occurred")
+		return
+	}
+	// The secret is shown exactly once, in this response.
+	writeJSON(w, http.StatusCreated, map[string]any{"token": token, "secret": secret})
+}
+
+func (s *Service) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	if err := s.RevokeAPIToken(r.Context(), user.ID, r.PathValue("tid")); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "token not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+// RequireUser guards a handler with session authentication. Two
+// credentials are accepted: the orbit_session cookie (browsers) and
+// Authorization: Bearer <token> (CLIs and scripts).
+func (s *Service) RequireUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := s.authenticate(r)
+		if !ok {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withUser(r.Context(), user)))
 	})
+}
+
+// authenticate resolves the caller from a session cookie or a Bearer
+// token. Sessions come first; Bearer fallback keeps API clients honest.
+func (s *Service) authenticate(r *http.Request) (User, bool) {
+	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
+		user, err := s.UserBySessionToken(r.Context(), c.Value)
+		if err == nil {
+			return user, true
+		}
+	}
+	const prefix = "Bearer "
+	if h := r.Header.Get("Authorization"); len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
+		if user, ok := s.UserByBearerToken(r.Context(), strings.TrimSpace(h[len(prefix):])); ok {
+			return user, true
+		}
+	}
+	return User{}, false
 }
 
 func (s *Service) handleRegister(w http.ResponseWriter, r *http.Request) {

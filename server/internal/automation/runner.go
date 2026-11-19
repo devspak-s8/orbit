@@ -202,6 +202,11 @@ func (r *Runner) RelayEvents(ctx context.Context) error {
 
 // ProcessNext claims one queued run and executes it. Returns false when the
 // queue is empty.
+// ProcessNext claims one queued run and executes it as a graph walk:
+// from the trigger, node by node, following single edges — and at a
+// branch node, following the yes/no edge the condition selects. Steps
+// for untaken paths are marked skipped; cancellation is observed
+// between steps. Returns false when the queue is empty.
 func (r *Runner) ProcessNext(ctx context.Context) (bool, error) {
 	run, ok, err := r.claim(ctx)
 	if err != nil || !ok {
@@ -228,31 +233,165 @@ func (r *Runner) ProcessNext(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 
+	def := wf.Definition
+	byID := map[string]Node{}
+	for _, n := range def.Nodes {
+		byID[n.ID] = n
+	}
+	outEdges := map[string][]Edge{}
+	for _, e := range def.Edges {
+		outEdges[e.From] = append(outEdges[e.From], e)
+	}
+	stepByNode := map[string]*Step{}
 	for i := range steps {
-		st := &steps[i]
-		if st.Status == "completed" {
-			continue // resumed after restart
-		}
-		node, found := r.findNode(wf, st.NodeID)
-		if !found {
-			r.failStep(ctx, st, "node missing from definition")
-			r.finishRun(ctx, run.ID, "failed", "node missing from definition")
-			return true, nil
-		}
-
-		r.markStepRunning(ctx, st)
-		out, stepErr := r.execWithRetries(ctx, node, run.TriggerPayload)
-		if stepErr != nil {
-			r.failStep(ctx, st, stepErr.Error())
-			r.skipRemaining(ctx, steps, i+1)
-			r.finishRun(ctx, run.ID, "failed", fmt.Sprintf("node %q failed: %s", st.NodeID, stepErr))
-			return true, nil
-		}
-		r.completeStep(ctx, st, out)
+		stepByNode[steps[i].NodeID] = &steps[i]
 	}
 
+	executed := map[string]bool{}
+	fail := func(nodeID string, stepErr error) {
+		r.skipPending(ctx, steps, executed)
+		r.finishRun(ctx, run.ID, "failed", fmt.Sprintf("node %q failed: %s", nodeID, stepErr))
+	}
+
+	current := "trigger"
+	for {
+		// Cancellation is observed between steps.
+		if status, err := r.runStatus(ctx, run.ID); err == nil && status == "cancelled" {
+			r.skipPending(ctx, steps, executed)
+			return true, nil // finishRun already stamped cancelled
+		}
+
+		// Pick the next node: branches follow their taken label; every
+		// other node follows its single edge.
+		edges := outEdges[current]
+		if len(edges) == 0 {
+			break // end of the path
+		}
+		var next string
+		if current != "trigger" && byID[current].Type == "branch" {
+			st := stepByNode[current]
+			taken, _ := st.Output["taken"].(string)
+			for _, e := range edges {
+				if e.Label == taken {
+					next = e.To
+					break
+				}
+			}
+			if next == "" {
+				fail(current, fmt.Errorf("branch has no %q edge", taken))
+				return true, nil
+			}
+		} else {
+			next = edges[0].To
+		}
+		if executed[next] {
+			fail(next, fmt.Errorf("cycle detected during execution"))
+			return true, nil
+		}
+
+		// Execute the next node.
+		node := byID[next]
+		st := stepByNode[next]
+		if st == nil {
+			fail(next, fmt.Errorf("node missing from definition"))
+			return true, nil
+		}
+		if st.Status != "completed" { // resumed runs skip done steps
+			r.markStepRunning(ctx, st)
+			if node.Type == "branch" {
+				// A branch step evaluates its condition and records the
+				// taken label — it is not executed like action nodes.
+				taken, terr := evalBranch(node.Config.Condition, run.TriggerPayload)
+				if terr != nil {
+					r.failStep(ctx, st, terr.Error())
+					fail(next, terr)
+					return true, nil
+				}
+				r.completeStep(ctx, st, map[string]any{"taken": taken})
+			} else {
+				out, stepErr := r.execWithRetries(ctx, node, run.TriggerPayload)
+				if stepErr != nil {
+					r.failStep(ctx, st, stepErr.Error())
+					fail(next, stepErr)
+					return true, nil
+				}
+				r.completeStep(ctx, st, out)
+			}
+		}
+		executed[next] = true
+		current = next
+	}
+
+	r.skipPending(ctx, steps, executed)
 	r.finishRun(ctx, run.ID, "completed", "")
 	return true, nil
+}
+
+// evalBranch evaluates a branch condition against the run payload.
+// Numeric comparison when both sides parse as numbers; == and != fall
+// back to string comparison.
+func evalBranch(c *Condition, payload map[string]any) (string, error) {
+	if c == nil {
+		return "", fmt.Errorf("branch condition is missing")
+	}
+	left := strings.TrimSpace(substituteTokens(c.Field, payload))
+
+	var rn float64
+	rIsNum := false
+	switch v := c.Value.(type) {
+	case float64:
+		rn, rIsNum = v, true
+	case int:
+		rn, rIsNum = float64(v), true
+	case int64:
+		rn, rIsNum = float64(v), true
+	case string:
+		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			rn, rIsNum = f, true
+		}
+	}
+	if ln, err := strconv.ParseFloat(left, 64); err == nil && rIsNum {
+		switch c.Op {
+		case ">":
+			return boolLabel(ln > rn), nil
+		case ">=":
+			return boolLabel(ln >= rn), nil
+		case "<":
+			return boolLabel(ln < rn), nil
+		case "<=":
+			return boolLabel(ln <= rn), nil
+		case "==":
+			return boolLabel(ln == rn), nil
+		case "!=":
+			return boolLabel(ln != rn), nil
+		}
+	}
+	ls := left
+	rs := fmt.Sprintf("%v", c.Value)
+	switch c.Op {
+	case "==":
+		return boolLabel(ls == rs), nil
+	case "!=":
+		return boolLabel(ls != rs), nil
+	default:
+		return "", fmt.Errorf("cannot compare %q %s %v (not numeric)", left, c.Op, c.Value)
+	}
+}
+
+func boolLabel(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+// runStatus reads a run's current status (for cancellation checks).
+func (r *Runner) runStatus(ctx context.Context, runID string) (string, error) {
+	var status string
+	err := r.pool.QueryRow(ctx,
+		`SELECT status FROM workflow_runs WHERE id = $1`, runID,
+	).Scan(&status)
+	return status, err
 }
 
 func (r *Runner) claim(ctx context.Context) (Run, bool, error) {
@@ -476,6 +615,7 @@ func substituteTokens(s string, payload map[string]any) string {
 // --- step/run state transitions ---
 
 func (r *Runner) markStepRunning(ctx context.Context, st *Step) {
+	st.Status = "running"
 	if _, err := r.pool.Exec(ctx,
 		`UPDATE workflow_steps SET status = 'running', started_at = COALESCE(started_at, now()) WHERE run_id = $1 AND seq = $2`,
 		st.RunID, st.Seq,
@@ -485,6 +625,11 @@ func (r *Runner) markStepRunning(ctx context.Context, st *Step) {
 }
 
 func (r *Runner) completeStep(ctx context.Context, st *Step, out map[string]any) {
+	st.Status = "completed"
+	if out == nil {
+		out = map[string]any{}
+	}
+	st.Output = out
 	if _, err := r.pool.Exec(ctx,
 		`UPDATE workflow_steps SET status = 'completed', output = $3, finished_at = now() WHERE run_id = $1 AND seq = $2`,
 		st.RunID, st.Seq, out,
@@ -494,6 +639,7 @@ func (r *Runner) completeStep(ctx context.Context, st *Step, out map[string]any)
 }
 
 func (r *Runner) failStep(ctx context.Context, st *Step, msg string) {
+	st.Status = "failed"
 	if _, err := r.pool.Exec(ctx,
 		`UPDATE workflow_steps SET status = 'failed', error = $3, finished_at = now() WHERE run_id = $1 AND seq = $2`,
 		st.RunID, st.Seq, msg,
@@ -502,14 +648,19 @@ func (r *Runner) failStep(ctx context.Context, st *Step, msg string) {
 	}
 }
 
-func (r *Runner) skipRemaining(ctx context.Context, steps []Step, from int) {
-	for i := from; i < len(steps); i++ {
-		st := steps[i]
-		if _, err := r.pool.Exec(ctx,
-			`UPDATE workflow_steps SET status = 'skipped', finished_at = now() WHERE run_id = $1 AND seq = $2`,
-			st.RunID, st.Seq,
-		); err != nil {
-			slog.Error("skip step", "error", err)
+// skipPending marks every step that this run did not execute (the untaken
+// branch path, or the tail after a failure) as skipped.
+func (r *Runner) skipPending(ctx context.Context, steps []Step, executed map[string]bool) {
+	for i := range steps {
+		st := &steps[i]
+		if st.Status == "pending" && !executed[st.NodeID] {
+			if _, err := r.pool.Exec(ctx,
+				`UPDATE workflow_steps SET status = 'skipped', finished_at = now() WHERE run_id = $1 AND seq = $2`,
+				st.RunID, st.Seq,
+			); err != nil {
+				slog.Error("skip step", "error", err)
+			}
+			st.Status = "skipped"
 		}
 	}
 }

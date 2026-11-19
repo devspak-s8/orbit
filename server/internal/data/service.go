@@ -663,6 +663,98 @@ func (s *Service) ExportCSV(ctx context.Context, userID, workspaceID, tableID st
 
 // --- public forms ---
 
+// RenameColumn renames a column. Values are keyed by id, so nothing else
+// changes.
+func (s *Service) RenameColumn(ctx context.Context, userID, workspaceID, columnID, name string) (Column, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 80 {
+		return Column{}, ErrInvalidColumn
+	}
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return Column{}, err
+	}
+	var c Column
+	err := s.pool.QueryRow(ctx,
+		`UPDATE module_data.columns SET name = $3
+		 WHERE id = $1
+		   AND table_id IN (SELECT id FROM module_data.tables WHERE workspace_id = $2)
+		 RETURNING id::text, name, type, options`,
+		columnID, workspaceID, name,
+	).Scan(&c.ID, &c.Name, &c.Type, &c.Options)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return Column{}, ErrNotFound
+		}
+		return Column{}, fmt.Errorf("rename column: %w", err)
+	}
+	return c, nil
+}
+
+// DeleteColumn removes a column and wipes its value from every record.
+// Destructive by design — the UI confirms, and the action is final.
+func (s *Service) DeleteColumn(ctx context.Context, userID, workspaceID, columnID string) error {
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx,
+		`DELETE FROM module_data.columns
+		 WHERE id = $1
+		   AND table_id IN (SELECT id FROM module_data.tables WHERE workspace_id = $2)`,
+		columnID, workspaceID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete column: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	// Strip the key from every record's JSONB.
+	if _, err := tx.Exec(ctx,
+		`UPDATE module_data.records
+		 SET data = data - $1, updated_at = now()
+		 WHERE workspace_id = $2 AND data ? $1`,
+		columnID, workspaceID,
+	); err != nil {
+		return fmt.Errorf("strip column values: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+// FormShape is the public column spec a public form renders from. It
+// carries no ids beyond what the form needs to submit values.
+type FormShape struct {
+	Columns []Column `json:"columns"`
+}
+
+// FormShape returns the public rendering spec for a form token. The token
+// is the authorization; unknown tokens return not found.
+func (s *Service) FormShape(ctx context.Context, token string) (FormShape, error) {
+	var tableID string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id FROM module_data.tables WHERE form_token = $1 AND archived_at IS NULL`,
+		token,
+	).Scan(&tableID)
+	if err != nil {
+		return FormShape{}, ErrNotFound
+	}
+	t, err := s.loadTable(ctx, tableID)
+	if err != nil {
+		return FormShape{}, err
+	}
+	if !s.Enabled(ctx, t.WorkspaceID) {
+		return FormShape{}, ErrNotFound
+	}
+	// Strip ids: the public submits by column id is required server-side;
+	// keep ids so submissions validate, but expose nothing else.
+	return FormShape{Columns: t.Columns}, nil
+}
+
 // EnableForm mints a public form token for the table (webhook pattern:
 // the secret is the URL).
 func (s *Service) EnableForm(ctx context.Context, userID, workspaceID, tableID string) (Table, error) {
