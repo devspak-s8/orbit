@@ -16,6 +16,8 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("GET /v1/workspaces", s.handleList)
 	api.HandleFunc("POST /v1/workspaces", s.handleCreate)
 	api.HandleFunc("GET /v1/workspaces/{id}", s.handleGet)
+	api.HandleFunc("PATCH /v1/workspaces/{id}", s.handleRename)
+	api.HandleFunc("DELETE /v1/workspaces/{id}", s.handleDeleteWorkspace)
 	api.HandleFunc("GET /v1/workspaces/{id}/members", s.handleListMembers)
 	api.HandleFunc("POST /v1/workspaces/{id}/invites", s.handleCreateInvite)
 }
@@ -24,6 +26,70 @@ func (s *Service) Handlers(api *http.ServeMux) {
 // mount these behind identity.RequireUser on the top-level API mux.
 func (s *Service) HandlersUser(api *http.ServeMux) {
 	api.HandleFunc("POST /v1/invites/{code}/redeem", s.handleRedeemInvite)
+}
+
+func (s *Service) handleRename(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	ws, err := s.UpdateWorkspace(r.Context(), user.ID, r.PathValue("id"), req.Name)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			apijson.WriteError(w, http.StatusForbidden, "forbidden", "only owners can rename")
+		case errors.Is(err, ErrNotFound):
+			apijson.WriteError(w, http.StatusNotFound, "not_found", "workspace not found")
+		case errors.Is(err, ErrInvalidName):
+			apijson.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		default:
+			apijson.WriteError(w, http.StatusInternalServerError, "internal", "an internal error occurred")
+		}
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"workspace": ws})
+}
+
+func (s *Service) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	var req struct {
+		ConfirmName string `json:"confirmName"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if err := s.DeleteWorkspace(r.Context(), user.ID, r.PathValue("id"), req.ConfirmName); err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			apijson.WriteError(w, http.StatusForbidden, "forbidden", "only owners can delete")
+		case errors.Is(err, ErrNotFound):
+			apijson.WriteError(w, http.StatusNotFound, "not_found", "workspace not found")
+		default:
+			apijson.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		}
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
+}
+
+func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		apijson.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return false
+	}
+	return true
 }
 
 func (s *Service) handleCreateInvite(w http.ResponseWriter, r *http.Request) {

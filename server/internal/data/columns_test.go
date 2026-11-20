@@ -17,8 +17,8 @@ func TestColumnRenameAndDelete(t *testing.T) {
 	}
 	score := colID(t, tbl, "Score")
 	rec, err := env.svc.CreateRecord(ctx, env.userID, env.wsID, tbl.ID, map[string]any{
-		colID(t, tbl, "Name"):  "Ada",
-		score:                  float64(42),
+		colID(t, tbl, "Name"): "Ada",
+		score:                 float64(42),
 	}, "ui")
 	if err != nil {
 		t.Fatalf("CreateRecord: %v", err)

@@ -310,7 +310,7 @@ func TestTaskCompletedFiresWorkflow(t *testing.T) {
 		}
 	}
 
-	runs, err := env.auto.ListRuns(env.ctx, env.userID, env.wsID, wf.ID)
+	runs, err := env.auto.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("runs = %d, err = %v; want exactly 1 event-triggered run", len(runs), err)
 	}

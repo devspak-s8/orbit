@@ -12,8 +12,10 @@ import (
 	"github.com/orbit-org/orbit/server/internal/automation"
 	"github.com/orbit-org/orbit/server/internal/data"
 	"github.com/orbit-org/orbit/server/internal/demo"
+	"github.com/orbit-org/orbit/server/internal/docs"
 	"github.com/orbit-org/orbit/server/internal/events"
 	"github.com/orbit-org/orbit/server/internal/identity"
+	"github.com/orbit-org/orbit/server/internal/mcp"
 	"github.com/orbit-org/orbit/server/internal/modules"
 	"github.com/orbit-org/orbit/server/internal/notifications"
 	"github.com/orbit-org/orbit/server/internal/work"
@@ -31,6 +33,8 @@ type Services struct {
 	Work          *work.Service
 	Data          *data.Service
 	Notifications *notifications.Service
+	Docs          *docs.Service
+	MCP           *mcp.Server
 }
 
 // NewRouter builds the full API handler with standard middleware applied.
@@ -74,6 +78,7 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string,
 	svcs.Automation.Handlers(wsAPI)
 	svcs.Work.Handlers(wsAPI)
 	svcs.Data.Handlers(wsAPI)
+	svcs.Docs.Handlers(wsAPI)
 	api.Handle("/v1/workspaces", svcs.Identity.RequireUser(wsAPI))
 	api.Handle("/v1/workspaces/", svcs.Identity.RequireUser(wsAPI))
 
@@ -85,6 +90,9 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string,
 
 	// Public form submissions use the same pattern (ADR-0005 semantics).
 	svcs.Data.FormHandlers(mux)
+
+	// MCP server: JSON-RPC 2.0 for external AI assistants. Bearer auth.
+	mux.HandleFunc("POST /mcp", svcs.MCP.HandleMCP)
 
 	var h http.Handler = mux
 	h = withCORS(allowedOrigins, h)

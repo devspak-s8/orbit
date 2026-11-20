@@ -13,6 +13,7 @@ import {
   type WorkflowRun,
   type WorkflowStep,
 } from '../lib/api'
+import { WorkflowCanvas } from '../components/WorkflowCanvas'
 
 function WebhookPanel({ workflow }: { workflow: Workflow }) {
   const [copied, setCopied] = useState(false)
@@ -70,6 +71,7 @@ export default function WorkflowDetail() {
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [editJSON, setEditJSON] = useState('')
+  const [canvasMode, setCanvasMode] = useState(false)
 
   function load() {
     if (!id || !wid) return
@@ -139,16 +141,31 @@ export default function WorkflowDetail() {
         >
           Validate
         </button>
-        {!editing && (
-          <button
-            onClick={() => {
-              setEditJSON(JSON.stringify(workflow?.definition ?? {}, null, 2))
-              setEditing(true)
-            }}
-            className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:border-neutral-500"
-          >
-            Edit definition
-          </button>
+        {!editing && !canvasMode && (
+          <>
+            <button
+              onClick={() => {
+                setEditJSON(JSON.stringify(workflow?.definition ?? {}, null, 2))
+                setEditing(true)
+              }}
+              className="rounded border border-neutral-700 px-3 py-1.5 text-sm hover:border-neutral-500"
+            >
+              Edit definition
+            </button>
+            {workflow?.definition && (
+              <button
+                onClick={() => setCanvasMode(!canvasMode)}
+                className={
+                  'rounded border px-3 py-1.5 text-sm ' +
+                  (canvasMode
+                    ? 'border-emerald-700 bg-emerald-900/30 text-emerald-300'
+                    : 'border-neutral-700 hover:border-neutral-500')
+                }
+              >
+                Canvas
+              </button>
+            )}
+          </>
         )}
       </div>
 
@@ -183,6 +200,22 @@ export default function WorkflowDetail() {
       )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
+
+      {canvasMode && workflow?.definition && (
+        <div className="max-w-5xl">
+          <WorkflowCanvas
+            definition={workflow.definition}
+            onSave={async (def) => {
+              try {
+                const updated = await updateWorkflow(id!, wid!, { definition: def })
+                setWorkflow(updated)
+              } catch (err) {
+                showError(err)
+              }
+            }}
+          />
+        </div>
+      )}
 
       {workflow && <WebhookPanel workflow={workflow} />}
 

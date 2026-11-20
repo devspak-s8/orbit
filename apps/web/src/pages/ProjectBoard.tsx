@@ -270,6 +270,12 @@ export default function ProjectBoard() {
             {v}
           </button>
         ))}
+        <Link
+          to={`/workspaces/${id}/work/${pid}/docs`}
+          className="rounded-lg border border-neutral-800 px-3 py-1.5 text-xs text-neutral-400 transition-colors hover:border-neutral-600"
+        >
+          Docs
+        </Link>
       </div>
 
       {/* Filter bar */}

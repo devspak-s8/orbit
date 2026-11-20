@@ -373,19 +373,27 @@ func (s *Service) enqueueRun(ctx context.Context, wf Workflow, triggerType strin
 	return run, nil
 }
 
-// ListRuns returns a workflow's runs, newest first.
-func (s *Service) ListRuns(ctx context.Context, userID, workspaceID, workflowID string) ([]Run, error) {
+// ListRuns returns a workflow's runs, newest first, with cursor pagination.
+// `?limit=50&before={runId}` — the cursor is the last run's ID from the
+// previous page.
+func (s *Service) ListRuns(ctx context.Context, userID, workspaceID, workflowID string, limit int, before string) ([]Run, error) {
 	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
 		return nil, err
 	}
 	if _, _, err := s.load(ctx, workspaceID, workflowID); err != nil {
 		return nil, err
 	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT id::text, workflow_id::text, workspace_id::text, version, status, trigger_type, trigger_payload, error, started_at, finished_at, created_at
-		 FROM workflow_runs WHERE workflow_id = $1
-		 ORDER BY created_at DESC LIMIT 100`,
-		workflowID,
+		 FROM workflow_runs
+		 WHERE workflow_id = $1
+		   AND ($2 = '' OR created_at < (SELECT created_at FROM workflow_runs WHERE id = $2::uuid))
+		 ORDER BY created_at DESC
+		 LIMIT $3`,
+		workflowID, before, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)

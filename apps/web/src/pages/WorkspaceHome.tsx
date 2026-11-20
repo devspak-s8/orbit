@@ -14,6 +14,7 @@ import {
   type Workspace,
   type WorkspaceModule,
 } from '../lib/api'
+import { WorkspaceSettings } from '../components/WorkspaceSettings'
 
 function ModuleCard({
   workspaceId,
@@ -264,6 +265,10 @@ export default function WorkspaceHome() {
       </div>
 
       <MembersSection workspaceId={workspace.id} isOwner={workspace.role === 'owner'} />
+
+      {workspace.role === 'owner' && (
+        <WorkspaceSettings workspace={workspace} onRenamed={(ws) => setWorkspace(ws)} />
+      )}
     </div>
   )
 }

@@ -3,6 +3,7 @@ package automation
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -204,7 +205,8 @@ func (s *Service) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
-	items, err := s.ListRuns(r.Context(), user.ID, r.PathValue("id"), r.PathValue("wid"))
+	items, err := s.ListRuns(r.Context(), user.ID, r.PathValue("id"), r.PathValue("wid"),
+		intFromQuery(r, "limit", 50), r.URL.Query().Get("before"))
 	if err != nil {
 		writeAutomationError(w, err)
 		return
@@ -212,7 +214,21 @@ func (s *Service) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []Run{}
 	}
-	apijson.WriteJSON(w, http.StatusOK, map[string]any{"runs": items})
+	var nextCursor string
+	if len(items) > 0 {
+		nextCursor = items[len(items)-1].ID
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"runs": items, "nextCursor": nextCursor})
+}
+
+func intFromQuery(r *http.Request, key string, def int) int {
+	if v := r.URL.Query().Get(key); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
 }
 
 func (s *Service) handleGetRun(w http.ResponseWriter, r *http.Request) {

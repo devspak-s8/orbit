@@ -276,7 +276,7 @@ func TestRunCancellation(t *testing.T) {
 			break
 		}
 	}
-	runs, _ := env.svc.ListRuns(ctx, env.userID, env.wsID, wf.ID)
+	runs, _ := env.svc.ListRuns(ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if len(runs) != 1 || runs[0].Status != "cancelled" {
 		t.Errorf("run after cancel = %+v, want cancelled", runs[0])
 	}

@@ -10,14 +10,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/orbit-org/orbit/server/internal/agents"
 	"github.com/orbit-org/orbit/server/internal/automation"
 	"github.com/orbit-org/orbit/server/internal/config"
 	"github.com/orbit-org/orbit/server/internal/data"
 	"github.com/orbit-org/orbit/server/internal/db"
 	"github.com/orbit-org/orbit/server/internal/demo"
+	"github.com/orbit-org/orbit/server/internal/docs"
 	"github.com/orbit-org/orbit/server/internal/events"
 	"github.com/orbit-org/orbit/server/internal/httpapi"
 	"github.com/orbit-org/orbit/server/internal/identity"
+	"github.com/orbit-org/orbit/server/internal/mcp"
 	"github.com/orbit-org/orbit/server/internal/modules"
 	"github.com/orbit-org/orbit/server/internal/notifications"
 	"github.com/orbit-org/orbit/server/internal/work"
@@ -64,14 +67,17 @@ func main() {
 	ws.UseNotifications(notifSvc)
 	workSvc := work.NewService(pool, eventsSvc, mods, notifSvc)
 	dataSvc := data.NewService(pool, eventsSvc, mods)
+	docsSvc := docs.NewService(pool, eventsSvc, mods)
+	agentsSvc := agents.NewService(pool)
+	mcpServer := mcp.New(pool, ident, agentsSvc, workSvc, dataSvc, docsSvc, automationSvc)
 	mods.RegisterUninstallHook(work.ModuleID, workSvc.Cleanup)
 	mods.RegisterUninstallHook(data.ModuleID, dataSvc.Cleanup)
+	mods.RegisterUninstallHook(docs.ModuleID, docsSvc.Cleanup)
 
 	if err := mods.Seed(ctx); err != nil {
 		logger.Error("seeding module registry", "error", err)
 		os.Exit(1)
 	}
-	mods.RegisterUninstallHook(work.ModuleID, workSvc.Cleanup)
 
 	// The automation worker runs in-process for the alpha (ADR-0004);
 	// its queue is durable so a separate process can take over later.
@@ -86,7 +92,9 @@ func main() {
 		Automation:    automationSvc,
 		Work:          workSvc,
 		Data:          dataSvc,
+		Docs:          docsSvc,
 		Notifications: notifSvc,
+		MCP:           mcpServer,
 	}
 
 	srv := &http.Server{

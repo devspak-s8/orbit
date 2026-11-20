@@ -122,10 +122,10 @@ func TestTableAndRecordCRUD(t *testing.T) {
 
 	// Create a record with valid, typed values.
 	values := map[string]any{
-		colID(t, tbl, "Name"):    "Ada Lovelace",
-		colID(t, tbl, "Score"):   float64(99),
-		colID(t, tbl, "Plan"):    "pro",
-		colID(t, tbl, "Active"):  true,
+		colID(t, tbl, "Name"):   "Ada Lovelace",
+		colID(t, tbl, "Score"):  float64(99),
+		colID(t, tbl, "Plan"):   "pro",
+		colID(t, tbl, "Active"): true,
 	}
 	rec, err := env.svc.CreateRecord(env.ctx, env.userID, env.wsID, tbl.ID, values, "ui")
 	if err != nil {
@@ -303,7 +303,7 @@ func TestPublicFormFiresWorkflow(t *testing.T) {
 			break
 		}
 	}
-	runs, err := env.auto.ListRuns(env.ctx, env.userID, env.wsID, wf.ID)
+	runs, err := env.auto.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("runs = %d, err = %v; want exactly 1", len(runs), err)
 	}

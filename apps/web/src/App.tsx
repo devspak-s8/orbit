@@ -17,6 +17,8 @@ import WorkModule from './pages/WorkModule'
 import ProjectBoard from './pages/ProjectBoard'
 import TaskDetail from './pages/TaskDetail'
 import DataModule from './pages/DataModule'
+import DocsPanel from './pages/DocsPanel'
+import WorkspaceDocs from './pages/WorkspaceDocs'
 import PublicForm from './pages/PublicForm'
 import APITokens from './pages/APITokens'
 
@@ -180,6 +182,8 @@ function ModuleRoute() {
       return <WorkModule />
     case 'orbit.data':
       return <DataModule />
+    case 'orbit.docs':
+      return <WorkspaceDocs />
     case 'orbit.demo':
       return <ModuleDemo />
     default:
@@ -245,6 +249,7 @@ export default function App() {
         <Route path="/workspaces/:id/work" element={<WorkModule />} />
         <Route path="/workspaces/:id/work/:pid" element={<ProjectBoard />} />
         <Route path="/workspaces/:id/work/:pid/task/:tid" element={<TaskDetail />} />
+        <Route path="/workspaces/:id/work/:pid/docs" element={<DocsPanel />} />
         <Route path="/workspaces/:id/data" element={<DataModule />} />
         <Route path="/workspaces/:id/data/:tid" element={<DataModule />} />
         <Route path="/forms/:token" element={<PublicForm />} />

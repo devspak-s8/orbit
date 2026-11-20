@@ -202,6 +202,52 @@ func (s *Service) Membership(ctx context.Context, userID, workspaceID string) (s
 	return role, nil
 }
 
+// UpdateWorkspace renames a workspace. Owner only.
+func (s *Service) UpdateWorkspace(ctx context.Context, userID, workspaceID, name string) (Workspace, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 80 {
+		return Workspace{}, ErrInvalidName
+	}
+	role, err := s.Membership(ctx, userID, workspaceID)
+	if err != nil {
+		return Workspace{}, err
+	}
+	if role != "owner" {
+		return Workspace{}, ErrForbidden
+	}
+	_, err = s.pool.Exec(ctx,
+		`UPDATE workspaces SET name = $2, updated_at = now() WHERE id = $1`,
+		workspaceID, name,
+	)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("rename workspace: %w", err)
+	}
+	return s.Get(ctx, userID, workspaceID)
+}
+
+// DeleteWorkspace removes a workspace and everything in it. Owner only,
+// and irreversible: the caller must supply the exact workspace name.
+func (s *Service) DeleteWorkspace(ctx context.Context, userID, workspaceID, confirmName string) error {
+	ws, err := s.Get(ctx, userID, workspaceID)
+	if err != nil {
+		return err
+	}
+	if ws.Role != "owner" {
+		return ErrForbidden
+	}
+	if confirmName != ws.Name {
+		return errors.New("confirmation name does not match the workspace name")
+	}
+	tag, err := s.pool.Exec(ctx, `DELETE FROM workspaces WHERE id = $1`, workspaceID)
+	if err != nil {
+		return fmt.Errorf("delete workspace: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // Member is a workspace member as seen in member lists.
 type Member struct {
 	UserID      string    `json:"userId"`

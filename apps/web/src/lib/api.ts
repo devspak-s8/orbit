@@ -651,10 +651,17 @@ export interface DataRecord {
   id: string
   tableId: string
   values: Record<string, unknown>
-  source: 'ui' | 'form' | 'csv'
+  source: 'ui' | 'form' | 'csv' | 'mcp'
   createdBy: string
   createdAt: string
   updatedAt: string
+}
+
+export function submitPublicForm(token: string, values: Record<string, unknown>): Promise<DataRecord> {
+  return api<{ record: DataRecord }>(`/forms/${token}`, {
+    method: 'POST',
+    body: JSON.stringify(values),
+  }).then((r) => r.record)
 }
 
 export function listTables(workspaceId: string): Promise<DataTable[]> {
@@ -732,9 +739,60 @@ export function enableForm(workspaceId: string, tableId: string): Promise<DataTa
   }).then((r) => r.table)
 }
 
-export function submitPublicForm(token: string, values: Record<string, unknown>): Promise<DataRecord> {
-  return api<{ record: DataRecord }>(`/forms/${token}`, {
+export interface Page {
+  id: string
+  projectId: string
+  workspaceId: string
+  title: string
+  body: string
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentRecord {
+  id: string
+  userId: string
+  name: string
+  description: string
+  tokenId: string
+  createdAt: string
+  revokedAt: string | null
+}
+
+export function listPages(workspaceId: string, projectId?: string): Promise<Page[]> {
+  const q = projectId ? `?projectId=${projectId}` : ''
+  return api<{ pages: Page[] }>(`/v1/workspaces/${workspaceId}/docs${q}`).then((r) => r.pages)
+}
+
+export function createPage(workspaceId: string, projectId: string, title: string, body: string): Promise<Page> {
+  return api<{ page: Page }>(`/v1/workspaces/${workspaceId}/docs`, {
     method: 'POST',
-    body: JSON.stringify(values),
-  }).then((r) => r.record)
+    body: JSON.stringify({ projectId, title, body }),
+  }).then((r) => r.page)
+}
+
+export function updatePage(workspaceId: string, pageId: string, title: string, body: string): Promise<Page> {
+  return api<{ page: Page }>(`/v1/workspaces/${workspaceId}/docs/${pageId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title, body }),
+  }).then((r) => r.page)
+}
+
+export function deletePage(workspaceId: string, pageId: string): Promise<void> {
+  return api(`/v1/workspaces/${workspaceId}/docs/${pageId}`, { method: 'DELETE' }).then(() => undefined)
+}
+
+export function renameWorkspace(workspaceId: string, name: string): Promise<Workspace> {
+  return api<{ workspace: Workspace }>(`/v1/workspaces/${workspaceId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  }).then((r) => r.workspace)
+}
+
+export function deleteWorkspace(workspaceId: string, confirmName: string): Promise<void> {
+  return api(`/v1/workspaces/${workspaceId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ confirmName }),
+  }).then(() => undefined)
 }

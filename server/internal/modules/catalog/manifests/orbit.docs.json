@@ -1,0 +1,13 @@
+{
+  "id": "orbit.docs",
+  "name": "Docs",
+  "version": "0.1.0",
+  "apiVersion": "1",
+  "description": "Pages and notes on projects — the wiki half of your workspace, with native automation events.",
+  "permissions": ["workspace.read", "events.write"],
+  "dependencies": ["orbit.core"],
+  "events": ["page.created", "page.updated"],
+  "entrypoints": {
+    "frontend": "frontend"
+  }
+}

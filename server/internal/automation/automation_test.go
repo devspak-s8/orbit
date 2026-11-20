@@ -164,7 +164,7 @@ func TestManualRunExecutesAndPersistsHistory(t *testing.T) {
 	}
 
 	// The run itself is persisted as completed.
-	runs, err := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID)
+	runs, err := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("ListRuns = %v, err = %v; want 1 run", runs, err)
 	}
@@ -218,7 +218,7 @@ func TestEventTriggerFiresWorkflow(t *testing.T) {
 	}
 	env.drain(t)
 
-	runs, err := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID)
+	runs, err := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("runs = %d, err = %v; want 1 event-triggered run", len(runs), err)
 	}
@@ -273,7 +273,7 @@ func TestFailedRunIsInspectable(t *testing.T) {
 		t.Errorf("step 2 = %+v, want skipped after failure", steps[1])
 	}
 
-	runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID)
+	runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if len(runs) != 1 || runs[0].Status != "failed" || runs[0].Error == "" {
 		t.Errorf("run = %+v, want failed with inspectable error", runs[0])
 	}
@@ -341,7 +341,7 @@ func TestRestartRecoveryResumesMidRun(t *testing.T) {
 	if steps[1].Status != "completed" {
 		t.Errorf("step 2 = %q, want completed after resume", steps[1].Status)
 	}
-	runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID)
+	runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if len(runs) != 1 || runs[0].Status != "completed" {
 		t.Errorf("run = %+v, want exactly one completed run", runs)
 	}
@@ -382,7 +382,7 @@ func TestRetriesRecoverTransientFailure(t *testing.T) {
 	if atomic.LoadInt32(&calls) != 2 {
 		t.Errorf("endpoint called %d times, want 2 (initial + 1 retry)", calls)
 	}
-	runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID)
+	runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if len(runs) != 1 || runs[0].Status != "completed" {
 		t.Errorf("run = %+v, want completed after retry", runs[0])
 	}

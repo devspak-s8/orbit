@@ -65,7 +65,7 @@ func TestWebhookTriggerDeliversAndRuns(t *testing.T) {
 	if msg, _ := steps[0].Output["message"].(string); msg != "hook said: 42" {
 		t.Errorf("substituted message = %q, want %q", msg, "hook said: 42")
 	}
-	runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID)
+	runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if len(runs) != 1 || runs[0].TriggerType != "webhook" {
 		t.Errorf("runs = %+v, want one webhook-triggered run", runs)
 	}
@@ -102,7 +102,7 @@ func TestScheduleFiresWhenDue(t *testing.T) {
 	if err := env.runner.RunDueSchedules(env.ctx); err != nil {
 		t.Fatalf("RunDueSchedules: %v", err)
 	}
-	if runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID); len(runs) != 0 {
+	if runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, ""); len(runs) != 0 {
 		t.Fatalf("premature runs = %d, want 0", len(runs))
 	}
 
@@ -116,7 +116,7 @@ func TestScheduleFiresWhenDue(t *testing.T) {
 		t.Fatalf("RunDueSchedules: %v", err)
 	}
 
-	runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID)
+	runs, _ := env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if len(runs) != 1 || runs[0].TriggerType != "schedule" {
 		t.Fatalf("runs = %+v, want one schedule-triggered run", runs)
 	}
@@ -125,7 +125,7 @@ func TestScheduleFiresWhenDue(t *testing.T) {
 	if err := env.runner.RunDueSchedules(env.ctx); err != nil {
 		t.Fatalf("RunDueSchedules second: %v", err)
 	}
-	runs, _ = env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID)
+	runs, _ = env.svc.ListRuns(env.ctx, env.userID, env.wsID, wf.ID, 50, "")
 	if len(runs) != 1 {
 		t.Fatalf("double-fire: runs = %d, want 1", len(runs))
 	}
