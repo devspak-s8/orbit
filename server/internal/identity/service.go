@@ -38,12 +38,19 @@ type User struct {
 
 // Service owns registration, authentication, and sessions.
 type Service struct {
-	pool       *pgxpool.Pool
-	sessionTTL time.Duration
+	pool         *pgxpool.Pool
+	sessionTTL   time.Duration
+	cookieSecure bool
 }
 
 func NewService(pool *pgxpool.Pool, sessionTTL time.Duration) *Service {
 	return &Service{pool: pool, sessionTTL: sessionTTL}
+}
+
+// SetCookieSecure enables the Secure flag on session cookies. Call once at
+// wiring time when the deployment serves the API over HTTPS.
+func (s *Service) SetCookieSecure(secure bool) {
+	s.cookieSecure = secure
 }
 
 // normalizeEmail lowercases and trims an email for storage and comparison.

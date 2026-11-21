@@ -56,6 +56,7 @@ func main() {
 	}
 
 	ident := identity.NewService(pool, cfg.SessionTTL)
+	ident.SetCookieSecure(cfg.CookieSecure)
 	ws := workspaces.NewService(pool)
 	mods := modules.NewService(pool, catalog)
 	eventsSvc := events.NewService(pool)

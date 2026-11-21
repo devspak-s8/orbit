@@ -132,7 +132,7 @@ func (s *Service) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, err)
 		return
 	}
-	setSessionCookie(w, token, s.sessionTTL)
+	s.setSessionCookie(w, token, s.sessionTTL)
 	writeJSON(w, http.StatusCreated, map[string]any{"user": user})
 }
 
@@ -149,7 +149,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, err)
 		return
 	}
-	setSessionCookie(w, token, s.sessionTTL)
+	s.setSessionCookie(w, token, s.sessionTTL)
 	writeJSON(w, http.StatusOK, map[string]any{"user": user})
 }
 
@@ -162,6 +162,7 @@ func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Name: sessionCookieName, Value: "", Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		MaxAge: -1,
+		Secure: s.cookieSecure,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
@@ -189,13 +190,12 @@ func UserFromContext(ctx context.Context) (User, bool) {
 	return u, ok
 }
 
-func setSessionCookie(w http.ResponseWriter, token string, ttl time.Duration) {
+func (s *Service) setSessionCookie(w http.ResponseWriter, token string, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: token, Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		MaxAge: int(ttl.Seconds()),
-		// Secure is set in production deployments via the reverse proxy
-		// config; local development runs over plain HTTP.
+		Secure: s.cookieSecure,
 	})
 }
 

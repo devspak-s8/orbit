@@ -229,6 +229,22 @@ func (s *Service) IsEnabled(ctx context.Context, workspaceID, moduleID string) b
 	return err == nil && enabled
 }
 
+// requireMemberForRead verifies the caller is a member of the workspace.
+func (s *Service) requireMemberForRead(ctx context.Context, userID, workspaceID string) error {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2)`,
+		workspaceID, userID,
+	).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errors.New("workspace not found")
+	}
+	return nil
+}
+
 func (s *Service) requireOwner(ctx context.Context, userID, workspaceID string) error {
 	var role string
 	err := s.pool.QueryRow(ctx,

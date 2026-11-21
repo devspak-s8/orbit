@@ -23,6 +23,9 @@ type Config struct {
 	// by design for the alpha (ADR-0005): the self-hoster configures the
 	// relay once; an empty host disables the email node with a clear error.
 	SMTP SMTPConfig
+	// CookieSecure sets the Secure flag on session cookies. Enable when
+	// serving the API over HTTPS (e.g. the public demo behind TLS).
+	CookieSecure bool
 }
 
 // SMTPConfig is the outbound email relay configuration.
@@ -47,6 +50,7 @@ func Load() Config {
 			Pass: envOr("ORBIT_SMTP_PASS", ""),
 			From: envOr("ORBIT_SMTP_FROM", "orbit@localhost"),
 		},
+		CookieSecure: os.Getenv("ORBIT_COOKIE_SECURE") == "true",
 	}
 }
 

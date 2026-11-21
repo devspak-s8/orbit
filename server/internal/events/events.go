@@ -101,25 +101,47 @@ func (s *Service) List(ctx context.Context, workspaceID string, limit int) ([]Ev
 	return items, rows.Err()
 }
 
+// requireMember verifies the caller is a member of the workspace.
+func (s *Service) requireMember(ctx context.Context, userID, workspaceID string) error {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2)`,
+		workspaceID, userID,
+	).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check membership: %w", err)
+	}
+	if !exists {
+		return errors.New("not found")
+	}
+	return nil
+}
+
 // Handlers wires event endpoints onto a mux that receives workspace paths.
 func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("GET /v1/workspaces/{id}/events", s.handleList)
 }
 
 func (s *Service) handleList(w http.ResponseWriter, r *http.Request) {
-	if _, ok := identity.UserFromContext(r.Context()); !ok {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
 		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
-	// The workspace membership guard runs in the router; here we only
-	// resolve the limit and query the log for the path workspace.
+	// SECURITY: verify the caller is a member of this workspace before
+	// revealing its event log (audit finding #2).
+	wsID := r.PathValue("id")
+	if err := s.requireMember(r.Context(), user.ID, wsID); err != nil {
+		apijson.WriteError(w, http.StatusNotFound, "not_found", "not found")
+		return
+	}
 	limit := 50
 	if q := r.URL.Query().Get("limit"); q != "" {
 		if n, err := strconv.Atoi(q); err == nil && n > 0 && n <= 100 {
 			limit = n
 		}
 	}
-	items, err := s.List(r.Context(), r.PathValue("id"), limit)
+	items, err := s.List(r.Context(), wsID, limit)
 	if err != nil {
 		apijson.WriteError(w, http.StatusInternalServerError, "internal", "an internal error occurred")
 		return

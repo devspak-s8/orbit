@@ -26,6 +26,12 @@ func (s *Service) gate(w http.ResponseWriter, r *http.Request) (string, string, 
 		return "", "", false
 	}
 	wsID := r.PathValue("id")
+	// SECURITY: membership before module status so strangers cannot probe
+	// whether a workspace exists (security audit finding #4).
+	if err := s.requireMember(r.Context(), user.ID, wsID); err != nil {
+		apijson.WriteError(w, http.StatusNotFound, "not_found", "not found")
+		return "", "", false
+	}
 	if !s.Enabled(r.Context(), wsID) {
 		apijson.WriteError(w, http.StatusNotFound, "not_found", ErrModuleOff.Error())
 		return "", "", false

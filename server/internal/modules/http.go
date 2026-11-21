@@ -24,6 +24,13 @@ func (s *Service) handleAvailable(w http.ResponseWriter, r *http.Request) {
 		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
+	// SECURITY: verify the caller is a member of this workspace before
+	// revealing its module list (audit finding #1).
+	user, _ := identity.UserFromContext(r.Context())
+	if err := s.requireMemberForRead(r.Context(), user.ID, r.PathValue("id")); err != nil {
+		apijson.WriteError(w, http.StatusNotFound, "not_found", "not found")
+		return
+	}
 	items, err := s.Available(r.Context(), r.PathValue("id"))
 	if err != nil {
 		apijson.WriteError(w, http.StatusInternalServerError, "internal", "an internal error occurred")

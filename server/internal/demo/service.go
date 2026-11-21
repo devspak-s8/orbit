@@ -37,6 +37,25 @@ func NewService(pool *pgxpool.Pool, events *events.Service, mods *modules.Servic
 	return &Service{pool: pool, events: events, mods: mods}
 }
 
+// requireMember verifies the caller is a member of the workspace.
+// SECURITY (audit finding #3): the demo gate previously checked only
+// authentication and module status, letting any logged-in user read or
+// write another workspace's records.
+func (s *Service) requireMember(ctx context.Context, userID, workspaceID string) error {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2)`,
+		workspaceID, userID,
+	).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check membership: %w", err)
+	}
+	if !exists {
+		return errors.New("not a member")
+	}
+	return nil
+}
+
 // Enabled reports whether the Demo module is installed and enabled in the
 // workspace; handlers use this to gate access.
 func (s *Service) Enabled(ctx context.Context, workspaceID string) bool {

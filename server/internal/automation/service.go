@@ -82,6 +82,11 @@ func NewService(pool *pgxpool.Pool) *Service {
 
 // Create stores a new workflow in draft with its first version.
 func (s *Service) Create(ctx context.Context, userID, workspaceID, name string, def Definition) (Workflow, error) {
+	// SECURITY (audit finding #5): authorize before validating, so
+	// strangers cannot use validation errors to probe anything.
+	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
+		return Workflow{}, err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 120 {
 		return Workflow{}, ErrInvalidInput
@@ -92,9 +97,6 @@ func (s *Service) Create(ctx context.Context, userID, workspaceID, name string, 
 	raw, err := json.Marshal(def)
 	if err != nil {
 		return Workflow{}, fmt.Errorf("marshal definition: %w", err)
-	}
-	if err := s.requireMember(ctx, userID, workspaceID); err != nil {
-		return Workflow{}, err
 	}
 
 	tx, err := s.pool.Begin(ctx)

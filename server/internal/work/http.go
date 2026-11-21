@@ -42,8 +42,10 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("DELETE /v1/workspaces/{id}/tasks/{tid}", s.handleDeleteTask)
 }
 
-// gate checks the session and the module install state. Returns the caller
-// id, workspace id, and whether to continue.
+// gate checks the session, membership, and the module install state. Returns
+// the caller id, workspace id, and whether to continue. Membership is checked
+// before module status so strangers cannot probe whether a workspace exists
+// (security audit finding #4); members see the module-off state legitimately.
 func (s *Service) gate(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	user, ok := identity.UserFromContext(r.Context())
 	if !ok {
@@ -51,6 +53,10 @@ func (s *Service) gate(w http.ResponseWriter, r *http.Request) (string, string, 
 		return "", "", false
 	}
 	wsID := r.PathValue("id")
+	if err := s.requireMember(r.Context(), user.ID, wsID); err != nil {
+		apijson.WriteError(w, http.StatusNotFound, "not_found", "not found")
+		return "", "", false
+	}
 	if !s.Enabled(r.Context(), wsID) {
 		apijson.WriteError(w, http.StatusNotFound, "not_found", ErrModuleDisabled.Error())
 		return "", "", false
