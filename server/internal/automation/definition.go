@@ -31,6 +31,11 @@ type NodeConfig struct {
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Body    map[string]any    `json:"body,omitempty"`
+	// Connector preset: when set, the node is a preset (Slack, Discord,
+	// Telegram, generic webhook) and method/url/headers/body are derived
+	// from the catalog at run time.
+	Connector string            `json:"connector,omitempty"`
+	Params    map[string]string `json:"params,omitempty"`
 	// Log node.
 	Message string `json:"message,omitempty"`
 	// Email node.
@@ -143,12 +148,21 @@ func (d *Definition) Validate() error {
 			continue
 		}
 		if n.Type == "http" {
-			if !httpMethods[n.Config.Method] {
-				problems = append(problems, fmt.Sprintf("node %q: method must be GET/POST/PUT/PATCH/DELETE", n.ID))
-			}
-			u, err := url.Parse(n.Config.URL)
-			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-				problems = append(problems, fmt.Sprintf("node %q: url must be an absolute http(s) URL", n.ID))
+			if n.Config.Connector != "" {
+				// Preset node: validated against the catalog; plain
+				// method/url must not be mixed in.
+				if n.Config.Method != "" || n.Config.URL != "" {
+					problems = append(problems, fmt.Sprintf("node %q: connector preset and method/url are mutually exclusive", n.ID))
+				}
+				problems = append(problems, validateConnectorNode(n.ID, n.Config.Connector, n.Config.Params)...)
+			} else {
+				if !httpMethods[n.Config.Method] {
+					problems = append(problems, fmt.Sprintf("node %q: method must be GET/POST/PUT/PATCH/DELETE", n.ID))
+				}
+				u, err := url.Parse(n.Config.URL)
+				if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+					problems = append(problems, fmt.Sprintf("node %q: url must be an absolute http(s) URL", n.ID))
+				}
 			}
 			if n.Config.Retries < 0 || n.Config.Retries > 5 {
 				problems = append(problems, fmt.Sprintf("node %q: retries must be 0-5", n.ID))

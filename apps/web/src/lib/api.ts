@@ -199,6 +199,8 @@ export interface WorkflowDefinition {
       url?: string
       headers?: Record<string, string>
       body?: Record<string, unknown>
+      connector?: string
+      params?: Record<string, string>
       message?: string
       to?: string
       subject?: string
@@ -210,6 +212,23 @@ export interface WorkflowDefinition {
   }>
   edges: Array<{ from: string; to: string; label?: string }>
   timeoutMs?: number
+}
+
+export interface ConnectorField {
+  key: string
+  label: string
+  type: 'text' | 'textarea' | 'url'
+  required: boolean
+  placeholder?: string
+  description?: string
+  urlPrefix?: string
+}
+
+export interface Connector {
+  id: string
+  name: string
+  category: string
+  fields: ConnectorField[]
 }
 
 export interface WorkflowRun {
@@ -304,6 +323,12 @@ export function cancelWorkflowRun(
   return api(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/runs/${runId}/cancel`, {
     method: 'POST',
   }).then(() => undefined)
+}
+
+// Connector presets are static catalog data served by the API so the
+// editor's form labels never drift from the backend's validation.
+export function listConnectors(): Promise<Connector[]> {
+  return api<{ connectors: Connector[] }>('/v1/connectors').then((r) => r.connectors)
 }
 
 export function updateWorkflow(

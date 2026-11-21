@@ -59,13 +59,16 @@ func NewRouter(pool *pgxpool.Pool, logger *slog.Logger, allowedOrigins []string,
 	// Identity endpoints (some public, some session-guarded internally).
 	svcs.Identity.Handlers(api)
 
-	// User-scoped routes: notifications and invite redemption.
+	// User-scoped routes: notifications, invite redemption, and the
+	// static connector-preset catalog.
 	userAPI := http.NewServeMux()
 	svcs.Notifications.Handlers(userAPI)
 	svcs.Workspaces.HandlersUser(userAPI)
+	svcs.Automation.CatalogHandlers(userAPI)
 	api.Handle("/v1/notifications", svcs.Identity.RequireUser(userAPI))
 	api.Handle("/v1/notifications/", svcs.Identity.RequireUser(userAPI))
 	api.Handle("/v1/invites/", svcs.Identity.RequireUser(userAPI))
+	api.Handle("/v1/connectors", svcs.Identity.RequireUser(userAPI))
 
 	// Everything under /v1/workspaces requires an authenticated session.
 	// Deeper authorization (membership, owner role, module enabled) is

@@ -211,6 +211,9 @@ export default function WorkflowDetail() {
                 setWorkflow(updated)
               } catch (err) {
                 showError(err)
+                // Rethrow so the canvas keeps its dirty state — a failed
+                // save must not silently drop the unsaved-edit indication.
+                throw err
               }
             }}
           />

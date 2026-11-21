@@ -25,6 +25,15 @@ func (s *Service) HookHandlers(root *http.ServeMux) {
 	root.HandleFunc("POST /hooks/{token}", s.handleWebhook)
 }
 
+// CatalogHandlers wires the connector-preset catalog onto a mux mounted
+// behind identity.RequireUser. The catalog is static (ships with the
+// binary), so it is user-scoped, not workspace-scoped.
+func (s *Service) CatalogHandlers(api *http.ServeMux) {
+	api.HandleFunc("GET /v1/connectors", func(w http.ResponseWriter, r *http.Request) {
+		apijson.WriteJSON(w, http.StatusOK, map[string]any{"connectors": WireCatalog()})
+	})
+}
+
 func (s *Service) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

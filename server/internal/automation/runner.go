@@ -542,9 +542,17 @@ func (r *Runner) execEmail(ctx context.Context, node Node, payload map[string]an
 
 // execHTTP performs the node's HTTP request. {{payload.key}} tokens in the
 // URL and body are substituted from the trigger payload. Responses with
-// status >= 400 fail the node.
+// status >= 400 fail the node. Connector presets (Slack, Discord, Telegram,
+// generic webhook) expand into a plain request first.
 func (r *Runner) execHTTP(ctx context.Context, node Node, payload map[string]any) (map[string]any, error) {
 	cfg := node.Config
+	if cfg.Connector != "" {
+		expanded, err := expandConnector(cfg)
+		if err != nil {
+			return nil, err
+		}
+		cfg = expanded
+	}
 	url := substituteTokens(cfg.URL, payload)
 
 	var bodyReader io.Reader
