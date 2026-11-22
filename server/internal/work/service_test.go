@@ -56,7 +56,7 @@ func setup(t *testing.T) *env {
 	eventsSvc := events.NewService(pool)
 	workSvc := NewService(pool, eventsSvc, mods, notifications.NewService(pool))
 	autoSvc := automation.NewService(pool)
-	runner := automation.NewRunner(pool, config.SMTPConfig{})
+	runner := automation.NewRunner(pool, config.SMTPConfig{}, nil)
 
 	email := fmt.Sprintf("work-%d@orbit.test", time.Now().UnixNano())
 	outsiderEmail := fmt.Sprintf("work-out-%d@orbit.test", time.Now().UnixNano())

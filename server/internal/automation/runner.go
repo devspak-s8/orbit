@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/orbit-org/orbit/server/internal/config"
+	"github.com/orbit-org/orbit/server/internal/notifications"
 )
 
 // Runner is the workflow execution worker: it relays platform events into
@@ -28,13 +29,17 @@ type Runner struct {
 	pool   *pgxpool.Pool
 	client *http.Client
 	smtp   config.SMTPConfig
+	// notifs receives workflow.failed notifications. nil disables them
+	// (self-healing is best-effort: notification errors never fail runs).
+	notifs *notifications.Service
 }
 
-func NewRunner(pool *pgxpool.Pool, smtp config.SMTPConfig) *Runner {
+func NewRunner(pool *pgxpool.Pool, smtp config.SMTPConfig, notifs *notifications.Service) *Runner {
 	return &Runner{
 		pool:   pool,
 		client: &http.Client{}, // per-request timeouts come from node config
 		smtp:   smtp,
+		notifs: notifs,
 	}
 }
 
@@ -679,6 +684,87 @@ func (r *Runner) finishRun(ctx context.Context, runID, status, errMsg string) {
 		runID, status, strings.TrimSpace(errMsg),
 	); err != nil {
 		slog.Error("finish run", "error", err)
+	}
+	if status == "failed" {
+		r.notifyFailure(ctx, runID, errMsg)
+	}
+}
+
+// notifyFailure tells every workspace member about a failed run
+// (self-healing, PRD 9.6). Escalates to an anomaly alert when the
+// workflow's last three runs all failed — repeated failures should be
+// loud, one-off failures quiet. Best-effort: logged, never fatal.
+func (r *Runner) notifyFailure(ctx context.Context, runID, errMsg string) {
+	if r.notifs == nil {
+		return
+	}
+	var wsID, wfID, wfName string
+	err := r.pool.QueryRow(ctx,
+		`SELECT r.workspace_id::text, r.workflow_id::text, w.name
+		 FROM workflow_runs r JOIN workflows w ON w.id = r.workflow_id
+		 WHERE r.id = $1`, runID,
+	).Scan(&wsID, &wfID, &wfName)
+	if err != nil {
+		slog.Error("notify failure: load run", "error", err)
+		return
+	}
+
+	// Anomaly: are the workflow's last three runs all failures?
+	var lastThreeFailed int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT count(*) FROM (
+		     SELECT status FROM workflow_runs
+		     WHERE workflow_id = $1 ORDER BY created_at DESC LIMIT 3
+		 ) recent WHERE status = 'failed'`, wfID,
+	).Scan(&lastThreeFailed); err != nil {
+		slog.Error("notify failure: count streak", "error", err)
+		return
+	}
+	anomaly := lastThreeFailed == 3
+
+	members, err := r.pool.Query(ctx,
+		`SELECT user_id::text FROM memberships WHERE workspace_id = $1`, wsID)
+	if err != nil {
+		slog.Error("notify failure: list members", "error", err)
+		return
+	}
+	defer members.Close()
+
+	payload := map[string]any{
+		"workflowId":   wfID,
+		"workflowName": wfName,
+		"runId":        runID,
+		"error":        strings.TrimSpace(errMsg),
+		"anomaly":      anomaly,
+	}
+	typ := "workflow.failed"
+	if anomaly {
+		typ = "workflow.anomaly"
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		slog.Error("notify failure: begin", "error", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	for members.Next() {
+		var userID string
+		if err := members.Scan(&userID); err != nil {
+			slog.Error("notify failure: scan member", "error", err)
+			return
+		}
+		if err := r.notifs.InsertTx(ctx, tx, userID, wsID, typ, payload); err != nil {
+			slog.Error("notify failure: insert", "error", err)
+			return
+		}
+	}
+	if err := members.Err(); err != nil {
+		slog.Error("notify failure: members", "error", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		slog.Error("notify failure: commit", "error", err)
 	}
 }
 

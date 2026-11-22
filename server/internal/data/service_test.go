@@ -82,7 +82,7 @@ func setup(t *testing.T) *env {
 	}
 
 	return &env{
-		svc: dataSvc, auto: autoSvc, runner: automation.NewRunner(pool, config.SMTPConfig{}),
+		svc: dataSvc, auto: autoSvc, runner: automation.NewRunner(pool, config.SMTPConfig{}, nil),
 		userID: user.ID, wsID: ws.ID, cleanup: cleanup, ctx: ctx,
 	}
 }

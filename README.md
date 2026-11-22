@@ -81,6 +81,19 @@ The JSON body becomes the run's payload — `{{payload.name}}` in any node
 config substitutes from it. The secret is the URL; unknown URLs return
 the same 404 as missing ones. Deliveries are rate-limited and audited.
 
+### Desktop app
+
+ORBIT also ships as a desktop app: an Electron shell for any self-hosted
+instance. Enter your server URL once — the app verifies `/healthz`, then
+opens your workspace in its own window with a tray icon.
+
+```bash
+cd apps/desktop
+npm install
+npm start         # run from source
+npm run dist      # build the installer (Windows NSIS; mac/linux configured)
+```
+
 ## Backups
 
 The database is the single source of truth; backing it up backs up everything.
@@ -99,6 +112,7 @@ The restore path is verified: a dump of the alpha schema (15 tables) restores cl
 
 ```
 apps/web/         React + TypeScript + Tailwind (Vite)
+apps/desktop/     Electron shell for any self-hosted instance
 server/           Go API — domains: identity, workspaces, modules, events,
                   automation (workflow engine), work (Work Management),
                   demo (reference module)

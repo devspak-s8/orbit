@@ -1,0 +1,42 @@
+{
+  "name": "@orbit/desktop",
+  "version": "1.2.0",
+  "description": "ORBIT desktop — a native shell for your self-hosted ORBIT workspace",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "org.orbit.desktop",
+    "productName": "ORBIT",
+    "files": [
+      "main.js",
+      "preload.js",
+      "connect.html",
+      "assets/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png",
+      "category": "Productivity"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

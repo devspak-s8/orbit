@@ -87,6 +87,15 @@ func (s *Service) Handlers(api *http.ServeMux) {
 	api.HandleFunc("GET /v1/workspaces/{id}/workflows/{wid}/runs", s.handleListRuns)
 	api.HandleFunc("GET /v1/workspaces/{id}/workflows/{wid}/runs/{rid}", s.handleGetRun)
 	api.HandleFunc("POST /v1/workspaces/{id}/workflows/{wid}/runs/{rid}/cancel", s.handleCancel)
+	api.HandleFunc("POST /v1/workspaces/{id}/workflows/{wid}/runs/{rid}/retry", s.handleRetryRun)
+
+	// Evals: dry-run replays with assertions. Capture-from-run is a field
+	// on create (`fromRunId`) rather than its own route — Go's ServeMux
+	// cannot rank a literal segment against {eid}/run.
+	api.HandleFunc("POST /v1/workspaces/{id}/workflows/{wid}/evals", s.handleCreateEval)
+	api.HandleFunc("GET /v1/workspaces/{id}/workflows/{wid}/evals", s.handleListEvals)
+	api.HandleFunc("POST /v1/workspaces/{id}/workflows/{wid}/evals/{eid}/run", s.handleRunEval)
+	api.HandleFunc("DELETE /v1/workspaces/{id}/workflows/{wid}/evals/{eid}", s.handleDeleteEval)
 }
 
 func (s *Service) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -257,12 +266,118 @@ func (s *Service) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	apijson.WriteJSON(w, http.StatusOK, map[string]any{"run": run, "steps": steps})
 }
 
+// handleRetryRun re-enqueues a failed or cancelled run with its original
+// payload — one-click self-healing.
+func (s *Service) handleRetryRun(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	run, err := s.RetryRun(r.Context(), user.ID, r.PathValue("id"), r.PathValue("wid"), r.PathValue("rid"))
+	if err != nil {
+		writeAutomationError(w, err)
+		return
+	}
+	// 202 like the run endpoint: execution is asynchronous.
+	apijson.WriteJSON(w, http.StatusAccepted, map[string]any{"run": run})
+}
+
+// --- evals ---
+
+func (s *Service) handleCreateEval(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	var req struct {
+		Name       string         `json:"name"`
+		Payload    map[string]any `json:"payload"`
+		Assertions []Assertion    `json:"assertions"`
+		// FromRunID captures a recorded run's trigger payload as the
+		// eval's payload ("replay recorded payloads") instead of an
+		// explicit payload.
+		FromRunID string `json:"fromRunId,omitempty"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apijson.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	if req.FromRunID != "" {
+		if req.Payload != nil {
+			apijson.WriteError(w, http.StatusBadRequest, "invalid_request", "fromRunId and payload are mutually exclusive")
+			return
+		}
+		e, err := s.CreateEvalFromRun(r.Context(), user.ID, r.PathValue("id"), r.PathValue("wid"), req.FromRunID, req.Name)
+		if err != nil {
+			writeAutomationError(w, err)
+			return
+		}
+		apijson.WriteJSON(w, http.StatusCreated, map[string]any{"eval": e})
+		return
+	}
+	e, err := s.CreateEval(r.Context(), user.ID, r.PathValue("id"), r.PathValue("wid"), req.Name, req.Payload, req.Assertions)
+	if err != nil {
+		writeAutomationError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusCreated, map[string]any{"eval": e})
+}
+
+func (s *Service) handleListEvals(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	items, err := s.ListEvals(r.Context(), user.ID, r.PathValue("id"), r.PathValue("wid"))
+	if err != nil {
+		writeAutomationError(w, err)
+		return
+	}
+	if items == nil {
+		items = []Eval{}
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"evals": items})
+}
+
+func (s *Service) handleRunEval(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	run, err := s.RunEval(r.Context(), user.ID, r.PathValue("id"), r.PathValue("wid"), r.PathValue("eid"))
+	if err != nil {
+		writeAutomationError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"evalRun": run})
+}
+
+func (s *Service) handleDeleteEval(w http.ResponseWriter, r *http.Request) {
+	user, ok := identity.UserFromContext(r.Context())
+	if !ok {
+		apijson.WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	if err := s.DeleteEval(r.Context(), user.ID, r.PathValue("id"), r.PathValue("wid"), r.PathValue("eid")); err != nil {
+		writeAutomationError(w, err)
+		return
+	}
+	apijson.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
 func writeAutomationError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrWorkflowNotFound), errors.Is(err, ErrRunNotFound):
+	case errors.Is(err, ErrWorkflowNotFound), errors.Is(err, ErrRunNotFound), errors.Is(err, ErrEvalNotFound):
 		apijson.WriteError(w, http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, ErrNotReady):
 		apijson.WriteError(w, http.StatusConflict, "not_ready", err.Error())
+	case errors.Is(err, ErrRunNotRetryable):
+		apijson.WriteError(w, http.StatusConflict, "not_retryable", err.Error())
 	case errors.Is(err, ErrForbidden):
 		apijson.WriteError(w, http.StatusForbidden, "forbidden", err.Error())
 	case errors.Is(err, ErrInvalidInput):

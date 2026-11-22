@@ -250,7 +250,7 @@ func TestEmailNodeSendsRealSMTP(t *testing.T) {
 	defer env.cleanup()
 
 	stub, port := startSMTPStub(t)
-	mailer := NewRunner(env.runner.pool, config.SMTPConfig{Host: "127.0.0.1", Port: port, From: "orbit@orbit.test"})
+	mailer := NewRunner(env.runner.pool, config.SMTPConfig{Host: "127.0.0.1", Port: port, From: "orbit@orbit.test"}, nil)
 
 	wf, err := env.svc.Create(env.ctx, env.userID, env.wsID, "Real mail", Definition{
 		Trigger: Trigger{Type: "manual"},

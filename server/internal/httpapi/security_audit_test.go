@@ -43,6 +43,7 @@ func TestSecurityAudit(t *testing.T) {
 	emailA := fmt.Sprintf("sec-a-%d@orbit.test", stamp)
 	emailB := fmt.Sprintf("sec-b-%d@orbit.test", stamp)
 	password := "password123"
+	fakeID := "00000000-0000-0000-0000-000000000000"
 
 	jarA, _ := cookiejar.New(nil)
 	jarB, _ := cookiejar.New(nil)
@@ -103,6 +104,11 @@ func TestSecurityAudit(t *testing.T) {
 			{"GET", fmt.Sprintf("/v1/workspaces/%s/modules", wsA)},
 			{"GET", fmt.Sprintf("/v1/workspaces/%s/events", wsA)},
 			{"POST", fmt.Sprintf("/v1/workspaces/%s/modules/orbit.work/install", wsA)},
+			{"GET", "/v1/connectors"},
+			{"GET", fmt.Sprintf("/v1/workspaces/%s/workflows/%s/evals", wsA, fakeID)},
+			{"POST", fmt.Sprintf("/v1/workspaces/%s/workflows/%s/evals", wsA, fakeID)},
+			{"POST", fmt.Sprintf("/v1/workspaces/%s/workflows/%s/evals/%s/run", wsA, fakeID, fakeID)},
+			{"POST", fmt.Sprintf("/v1/workspaces/%s/workflows/%s/runs/%s/retry", wsA, fakeID, fakeID)},
 		}
 		for _, r := range noAuthRoutes {
 			req, _ := http.NewRequest(r.method, base+r.path, strings.NewReader("{}"))
@@ -158,6 +164,9 @@ func TestSecurityAudit(t *testing.T) {
 			{"DELETE", fmt.Sprintf("/v1/workspaces/%s/modules/orbit.work", wsA), ""},
 			{"POST", fmt.Sprintf("/v1/workspaces/%s/invites", wsA), `{}`},
 			{"PATCH", fmt.Sprintf("/v1/workspaces/%s", wsA), `{"name":"Evil"}`},
+			{"POST", fmt.Sprintf("/v1/workspaces/%s/workflows/%s/evals", wsA, fakeID), `{"name":"Evil"}`},
+			{"POST", fmt.Sprintf("/v1/workspaces/%s/workflows/%s/evals/%s/run", wsA, fakeID, fakeID), `{}`},
+			{"POST", fmt.Sprintf("/v1/workspaces/%s/workflows/%s/runs/%s/retry", wsA, fakeID, fakeID), `{}`},
 		}
 		for _, w := range writes {
 			req, _ := http.NewRequest(w.method, base+w.path, strings.NewReader(w.body))

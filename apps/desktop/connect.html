@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>ORBIT</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; }
+      body {
+        font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+        background: #0a0a0a;
+        color: #e5e5e5;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .card { width: 420px; padding: 40px; }
+      .logo {
+        width: 64px; height: 64px; border-radius: 14px;
+        background: #0f201a;
+        border: 1px solid #14532d;
+        display: flex; align-items: center; justify-content: center;
+        margin-bottom: 24px; position: relative;
+      }
+      .logo::before {
+        content: ''; position: absolute; width: 20px; height: 20px;
+        border-radius: 50%; background: #10b981;
+        box-shadow: 0 0 24px rgba(16, 185, 129, 0.5);
+      }
+      .logo::after {
+        content: ''; position: absolute; width: 44px; height: 16px;
+        border: 2px solid #34d399; border-radius: 50%;
+        transform: rotate(-24deg);
+      }
+      h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.01em; }
+      p.sub { margin: 8px 0 28px; font-size: 13px; color: #737373; line-height: 1.5; }
+      label { display: block; font-size: 12px; color: #a3a3a3; margin-bottom: 6px; }
+      input {
+        width: 100%; padding: 10px 12px; font-size: 14px;
+        background: #171717; color: #e5e5e5;
+        border: 1px solid #262626; border-radius: 8px;
+        outline: none; font-family: ui-monospace, monospace;
+      }
+      input:focus { border-color: #10b981; }
+      button {
+        margin-top: 16px; width: 100%; padding: 10px 12px; font-size: 14px;
+        font-weight: 600; color: #052e16; background: #10b981;
+        border: none; border-radius: 8px; cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .error { margin-top: 12px; font-size: 12px; color: #f87171; min-height: 16px; }
+      .hint { margin-top: 24px; font-size: 11px; color: #525252; line-height: 1.6; }
+      .hint code { color: #737373; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="logo"></div>
+      <h1>Connect to your ORBIT</h1>
+      <p class="sub">
+        ORBIT is self-hosted — this app is a shell for <em>your</em> instance.
+        Enter the web address of your deployment.
+      </p>
+      <form id="form">
+        <label for="url">Server URL</label>
+        <input id="url" type="text" placeholder="http://localhost:8081" spellcheck="false" autofocus />
+        <button id="go" type="submit">Connect</button>
+        <p class="error" id="error"></p>
+      </form>
+      <p class="hint">
+        Running the stack locally? The default is <code>http://localhost:8081</code>.
+        The server is verified via <code>/healthz</code> before connecting.
+      </p>
+    </main>
+    <script>
+      const form = document.getElementById('form')
+      const input = document.getElementById('url')
+      const button = document.getElementById('go')
+      const error = document.getElementById('error')
+      const bridge = window.orbitDesktop
+
+      if (bridge) {
+        bridge.getServer().then((url) => {
+          if (url) input.value = url
+        })
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault()
+        error.textContent = ''
+        button.disabled = true
+        button.textContent = 'Connecting…'
+        try {
+          const result = bridge
+            ? await bridge.connect(input.value)
+            : { ok: false, error: 'Desktop bridge unavailable — run via `npm start`' }
+          if (!result.ok) {
+            error.textContent = result.error
+            button.disabled = false
+            button.textContent = 'Connect'
+          }
+        } catch (err) {
+          error.textContent = String(err)
+          button.disabled = false
+          button.textContent = 'Connect'
+        }
+      })
+    </script>
+  </body>
+</html>

@@ -655,6 +655,93 @@ export function markAllNotificationsRead(): Promise<void> {
   return api<{ status: string }>('/v1/notifications/read-all', { method: 'POST' }).then(() => undefined)
 }
 
+// --- workflow evals ---
+
+export interface EvalAssertion {
+  nodeId: string
+  property: string
+  op: '==' | '!=' | 'contains'
+  value: unknown
+}
+
+export interface AssertionResult {
+  assertion: EvalAssertion
+  passed: boolean
+  actual?: unknown
+  reason?: string
+}
+
+export interface WorkflowEval {
+  id: string
+  workflowId: string
+  name: string
+  payload: Record<string, unknown>
+  assertions: EvalAssertion[]
+  lastRun?: {
+    id: string
+    passed: boolean
+    results: AssertionResult[]
+    createdAt: string
+  } | null
+  createdAt: string
+}
+
+export interface EvalRunResult {
+  id: string
+  passed: boolean
+  results: AssertionResult[]
+  createdAt: string
+}
+
+export function listWorkflowEvals(workspaceId: string, workflowId: string): Promise<WorkflowEval[]> {
+  return api<{ evals: WorkflowEval[] }>(
+    `/v1/workspaces/${workspaceId}/workflows/${workflowId}/evals`,
+  ).then((r) => r.evals)
+}
+
+export function createWorkflowEval(
+  workspaceId: string,
+  workflowId: string,
+  body: { name: string; payload?: Record<string, unknown>; assertions: EvalAssertion[]; fromRunId?: string },
+): Promise<WorkflowEval> {
+  return api<{ eval: WorkflowEval }>(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/evals`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }).then((r) => r.eval)
+}
+
+export function runWorkflowEval(
+  workspaceId: string,
+  workflowId: string,
+  evalId: string,
+): Promise<EvalRunResult> {
+  return api<{ evalRun: EvalRunResult }>(
+    `/v1/workspaces/${workspaceId}/workflows/${workflowId}/evals/${evalId}/run`,
+    { method: 'POST' },
+  ).then((r) => r.evalRun)
+}
+
+export function deleteWorkflowEval(
+  workspaceId: string,
+  workflowId: string,
+  evalId: string,
+): Promise<void> {
+  return api(`/v1/workspaces/${workspaceId}/workflows/${workflowId}/evals/${evalId}`, {
+    method: 'DELETE',
+  }).then(() => undefined)
+}
+
+export function retryWorkflowRun(
+  workspaceId: string,
+  workflowId: string,
+  runId: string,
+): Promise<WorkflowRun> {
+  return api<{ run: WorkflowRun }>(
+    `/v1/workspaces/${workspaceId}/workflows/${workflowId}/runs/${runId}/retry`,
+    { method: 'POST' },
+  ).then((r) => r.run)
+}
+
 export interface DataColumn {
   id: string
   name: string

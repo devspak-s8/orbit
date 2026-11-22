@@ -69,6 +69,7 @@ function NotificationBell() {
 
   const describe = (n: AppNotification): string => {
     const title = (n.payload['title'] as string) ?? ''
+    const wfName = (n.payload['workflowName'] as string) ?? 'a workflow'
     switch (n.type) {
       case 'task.assigned':
         return `You were assigned "${title}"`
@@ -76,9 +77,22 @@ function NotificationBell() {
         return `"${title}" was completed`
       case 'member.joined':
         return 'Someone joined your workspace'
+      case 'workflow.failed':
+        return `Workflow "${wfName}" failed`
+      case 'workflow.anomaly':
+        return `Workflow "${wfName}" keeps failing — needs attention`
       default:
         return n.type
     }
+  }
+
+  // Workflow failure notifications link straight to the run history.
+  const linkFor = (n: AppNotification): string | null => {
+    const wfId = n.payload['workflowId'] as string | undefined
+    if ((n.type === 'workflow.failed' || n.type === 'workflow.anomaly') && wfId) {
+      return `/workspaces/${n.workspaceId}/workflows/${wfId}`
+    }
+    return null
   }
 
   return (
@@ -112,20 +126,36 @@ function NotificationBell() {
             <p className="py-2 text-sm text-neutral-500">Nothing yet.</p>
           ) : (
             <ul className="max-h-72 space-y-1 overflow-auto">
-              {items.map((n) => (
-                <li
-                  key={n.id}
-                  className={
-                    'rounded px-2 py-1.5 text-sm ' +
-                    (n.readAt ? 'text-neutral-500' : 'bg-neutral-800/60 text-neutral-200')
-                  }
-                >
-                  {describe(n)}
-                  <span className="ml-1 text-xs text-neutral-600">
-                    {new Date(n.createdAt).toLocaleDateString()}
-                  </span>
-                </li>
-              ))}
+              {items.map((n) => {
+                const to = linkFor(n)
+                const inner = (
+                  <>
+                    <span className={n.type === 'workflow.anomaly' ? 'text-amber-300' : undefined}>
+                      {describe(n)}
+                    </span>
+                    <span className="ml-1 text-xs text-neutral-600">
+                      {new Date(n.createdAt).toLocaleDateString()}
+                    </span>
+                  </>
+                )
+                return (
+                  <li
+                    key={n.id}
+                    className={
+                      'rounded px-2 py-1.5 text-sm ' +
+                      (n.readAt ? 'text-neutral-500' : 'bg-neutral-800/60 text-neutral-200')
+                    }
+                  >
+                    {to ? (
+                      <Link to={to} onClick={() => setOpen(false)} className="hover:underline">
+                        {inner}
+                      </Link>
+                    ) : (
+                      inner
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           )}
         </div>
