@@ -4,16 +4,18 @@
 
 ORBIT replaces a stack of disconnected subscriptions (task management, automation, data, docs) with one platform: independent modules sharing a single login, one data model, and a built-in automation engine. A task event in one module can trigger a workflow that updates data in another — natively, without glue code.
 
-> **Status: pre-alpha (v0.1.0-alpha).** The platform core is working end to end: identity, workspaces, a module system with install/enable lifecycle, a platform event log, and a durable workflow engine with event triggers and HTTP actions. The first user-facing module (Work Management) is next. See the [roadmap](docs/ROADMAP.md) and [plan](PLAN.md).
+> **Status: v1.2.0 — released and self-hostable today.** Twelve tagged releases so far. The platform core plus four product modules are live, hardened by a [published security audit](docs/security/audit-2026-11-21.md) with a live attack suite that runs against every release. Decisions are documented as [ADRs](docs/adr); every feature ships from a written [plan](docs/plans) with end-to-end verification.
 
 ## What works today
 
-- **Accounts** — signup, login, sessions (Argon2id, server-side revocable sessions, rate limiting, audit log)
-- **Workspaces** — tenant-isolated environments; cross-workspace access is enforced at the data layer
-- **Work Management** — the first product module: projects, tasks, boards, assignments, due dates, priorities; lifecycle events feed the automation engine
-- **Modules** — manifest-based registry, install → enable → disable → uninstall lifecycle (owner-only), UI registration
-- **Event log** — transactional, workspace-scoped events
-- **Automation engine** — JSON workflow definitions with validation (drafts never execute), four triggers (**platform events, manual runs, inbound webhooks, schedules**), **HTTP, log, and email** nodes, per-node retries and timeouts, per-step durable execution history, and restart recovery that resumes interrupted runs
+- **Accounts & workspaces** — signup, login (Argon2id, revocable sessions, rate limiting), tenant-isolated workspaces, shareable invites, in-app notifications
+- **Work Management** — projects, boards (drag-and-drop), list/calendar/timeline views, tasks, subtasks, dependencies, labels, comments, time tracking
+- **Data** — tables with typed columns, records, CSV import/export, public forms on secret URLs
+- **Docs** — pages attached to projects, feeding the event log
+- **Automation engine** — durable Postgres-backed workflows: event/manual/webhook/schedule triggers, HTTP, log, email, and branch nodes, **connector presets** (Slack, Discord, Telegram, generic webhook), per-step durability, restart recovery, **workflow evals** (dry-run replays with assertions), self-healing failure notifications with one-click retry
+- **AI-native surface** — built-in **MCP server** (JSON-RPC, 10 tools) so Claude/Cursor/ChatGPT can operate your workspace, plus named **agent identities** with audit attribution
+- **API tokens & security** — Bearer tokens (SHA-256 at rest), live security audit over every route, uniform 404s on secret URLs
+- **Desktop app** — Electron shell for any self-hosted instance (`apps/desktop`)
 
 ## Run the full stack
 
@@ -93,6 +95,26 @@ npm install
 npm start         # run from source
 npm run dist      # build the installer (Windows NSIS; mac/linux configured)
 ```
+
+## Contributing
+
+The highest-leverage contribution is a **new module** — ORBIT is designed
+so a module is a self-contained Go package plus a web page, with the
+platform providing accounts, workspaces, events, and automation:
+
+1. Read `docs/adr/0002-modular-monolith-and-monorepo.md`, then study
+   `server/internal/demo` (the reference module: schema, manifest, routes,
+   events, uninstall hook — under 150 lines of Go)
+2. Pick from the post-1.0 module list in `docs/ROADMAP.md` — Infrastructure
+   Studio, Observability, Security Lab, AI Studio, File Studio — or propose
+   your own
+3. Connector presets (Twilio, GitHub, PagerDuty…) are self-contained
+   entries in `server/internal/automation/connectors.go`
+
+Every PR runs the full suite (Go + web build, serialized against a fresh
+PostgreSQL). A live security audit (`TestSecurityAudit`) runs against a
+booted instance — add your routes to its inventory and it will verify
+your auth and tenant isolation for you.
 
 ## Backups
 

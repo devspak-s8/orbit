@@ -196,6 +196,20 @@ if (!singleInstance) {
     }
   })
 
+  // Exit diagnostics: the desktop shell must never disappear silently.
+  process.on('uncaughtException', (err) => {
+    console.error('[orbit] uncaught exception:', err)
+  })
+  app.on('render-process-gone', (_e, _wc, details) => {
+    console.error('[orbit] renderer gone:', details.reason, details.exitCode)
+  })
+  app.on('child-process-gone', (_e, details) => {
+    console.error('[orbit] child process gone:', details.type, details.reason, details.exitCode)
+  })
+  app.on('will-quit', () => {
+    console.error('[orbit] will-quit: isQuitting =', !!app.isQuitting)
+  })
+
   app.whenReady().then(() => {
     applyMenu()
     createWindow()
